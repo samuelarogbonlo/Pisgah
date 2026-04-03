@@ -21,66 +21,6 @@ type DashboardRow = {
   dateLabel: string;
 };
 
-const DEMO_ROWS: DashboardRow[] = [
-  {
-    id: "demo-1",
-    patientName: "Amara Okafor",
-    testType: "Complete Blood Count",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "Doctor Review",
-    dateLabel: "Today, 10:07",
-  },
-  {
-    id: "demo-2",
-    patientName: "Emeka Nwankwo",
-    testType: "Malaria RDT",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "In Lab",
-    dateLabel: "Today, 09:15",
-  },
-  {
-    id: "demo-3",
-    patientName: "Fatima Bello",
-    testType: "Liver Function",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "Awaiting Payment",
-    dateLabel: "Today, 08:45",
-  },
-  {
-    id: "demo-4",
-    patientName: "Chidi Okonkwo",
-    testType: "Urinalysis",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "Completed",
-    dateLabel: "Yesterday",
-  },
-  {
-    id: "demo-5",
-    patientName: "Ngozi Eze",
-    testType: "Renal Function",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "Patient Notified",
-    dateLabel: "Yesterday",
-  },
-  {
-    id: "demo-6",
-    patientName: "Blessing Adamu",
-    testType: "Malaria RDT",
-    doctorName: "Dr. Adeyemi",
-    statusLabel: "Ready for Pickup",
-    dateLabel: "Today, 11:30",
-  },
-];
-
-const DEMO_PRIORITY = [
-  "Amara Okafor",
-  "Emeka Nwankwo",
-  "Fatima Bello",
-  "Chidi Okonkwo",
-  "Ngozi Eze",
-  "Blessing Adamu",
-];
-
 function toCurrency(amount: number) {
   return `₦${amount.toLocaleString("en-NG")}`;
 }
@@ -173,7 +113,7 @@ export default async function DashboardPage() {
       .from(billingRecords),
   ]);
 
-  const liveRows = orders.map((order) => ({
+  const rows: DashboardRow[] = orders.map((order) => ({
     id: order.id,
     patientName: order.patientName,
     testType: order.testType,
@@ -185,40 +125,19 @@ export default async function DashboardPage() {
     dateLabel: formatDateLabel(order.createdAt),
   }));
 
-  const rowPriority = new Map(
-    DEMO_PRIORITY.map((patientName, index) => [patientName, index])
-  );
+  const activeCount = rows.filter((row) =>
+    ["Doctor Review", "In Lab", "Awaiting Payment"].includes(row.statusLabel)
+  ).length;
 
-  const rows =
-    liveRows.length > 0
-      ? [...liveRows].sort((a, b) => {
-          const aRank = rowPriority.get(a.patientName) ?? Number.MAX_SAFE_INTEGER;
-          const bRank = rowPriority.get(b.patientName) ?? Number.MAX_SAFE_INTEGER;
-          return aRank - bRank;
-        })
-      : DEMO_ROWS;
+  const reviewCount = rows.filter(
+    (row) => row.statusLabel === "Doctor Review"
+  ).length;
 
-  const activeCount =
-    liveRows.length > 0
-      ? rows.filter((row) =>
-          ["Doctor Review", "In Lab", "Awaiting Payment"].includes(
-            row.statusLabel
-          )
-        ).length
-      : 3;
+  const completedTodayCount = rows.filter(
+    (row) => row.statusLabel !== "Awaiting Payment"
+  ).length;
 
-  const reviewCount =
-    liveRows.length > 0
-      ? rows.filter((row) => row.statusLabel === "Doctor Review").length
-      : 1;
-
-  const completedTodayCount =
-    liveRows.length > 0
-      ? rows.filter((row) => row.statusLabel !== "Awaiting Payment").length
-      : 5;
-
-  const billedToday =
-    liveRows.length > 0 ? billingSummary[0]?.total ?? 0 : 48500;
+  const billedToday = billingSummary[0]?.total ?? 0;
 
   return (
     <div>
@@ -272,7 +191,11 @@ export default async function DashboardPage() {
           All Orders
         </h3>
 
-        <OrderTable rows={rows} />
+        {rows.length > 0 ? (
+          <OrderTable rows={rows} />
+        ) : (
+          <p className="text-sm text-gray-400 py-8 text-center">No orders yet</p>
+        )}
       </div>
     </div>
   );

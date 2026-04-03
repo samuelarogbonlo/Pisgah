@@ -1,29 +1,43 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { createOrder } from "@/app/actions";
+import { createOrder, createOrderWithNewPatient } from "@/app/actions";
 
 interface Patient {
   id: string;
   name: string;
 }
 
-const TEST_TYPES = [
-  "Complete Blood Count",
-  "Malaria RDT",
-  "Urinalysis",
-  "Liver Function",
-  "Renal Function",
-] as const;
+interface CatalogItem {
+  testName: string;
+  price: string;
+}
 
-export function CreateOrderForm({ patients }: { patients: Patient[] }) {
+interface CreateOrderFormProps {
+  patients: Patient[];
+  catalog: CatalogItem[];
+}
+
+export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  const [isNewPatient, setIsNewPatient] = useState(false);
+  const [selectedTest, setSelectedTest] = useState(catalog[0]?.testName ?? "");
+  const [amount, setAmount] = useState(catalog[0]?.price ?? "0");
+
+  function handleTestChange(testName: string) {
+    setSelectedTest(testName);
+    const match = catalog.find((c) => c.testName === testName);
+    if (match) {
+      setAmount(match.price);
+    }
+  }
 
   function handleSubmit(formData: FormData) {
     setMessage(null);
     startTransition(async () => {
-      const result = await createOrder(formData);
+      const action = isNewPatient ? createOrderWithNewPatient : createOrder;
+      const result = await action(formData);
       if (result.error) {
         setMessage(`Error: ${result.error}`);
       } else {
@@ -35,23 +49,92 @@ export function CreateOrderForm({ patients }: { patients: Patient[] }) {
 
   return (
     <form action={handleSubmit}>
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 max-sm:grid-cols-1">
-        <div>
-          <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
-            Patient
-          </label>
-          <select
-            name="patientId"
-            required
-            className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+      <input type="hidden" name="isNewPatient" value={isNewPatient ? "true" : "false"} />
+
+      {/* Patient toggle */}
+      <div className="mb-4">
+        <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-sm">
+          <button
+            type="button"
+            onClick={() => setIsNewPatient(false)}
+            className={`px-3 py-1.5 transition-colors ${
+              !isNewPatient
+                ? "bg-black text-white"
+                : "bg-white text-gray-600 hover:bg-gray-50"
+            }`}
           >
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            Select existing patient
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsNewPatient(true)}
+            className={`px-3 py-1.5 transition-colors ${
+              isNewPatient
+                ? "bg-black text-white"
+                : "bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Register new patient
+          </button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3 max-sm:grid-cols-1">
+        {!isNewPatient ? (
+          <div>
+            <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
+              Patient
+            </label>
+            <select
+              name="patientId"
+              required
+              className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+            >
+              {patients.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
+                Patient Name
+              </label>
+              <input
+                type="text"
+                name="patientName"
+                required
+                placeholder="Full name"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
+                Phone
+              </label>
+              <input
+                type="tel"
+                name="patientPhone"
+                placeholder="+234..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
+                Date of Birth
+              </label>
+              <input
+                type="date"
+                name="patientDob"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+              />
+            </div>
+          </>
+        )}
+
         <div>
           <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
             Test Type
@@ -59,15 +142,18 @@ export function CreateOrderForm({ patients }: { patients: Patient[] }) {
           <select
             name="testType"
             required
+            value={selectedTest}
+            onChange={(e) => handleTestChange(e.target.value)}
             className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
           >
-            {TEST_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
+            {catalog.map((c) => (
+              <option key={c.testName} value={c.testName}>
+                {c.testName}
               </option>
             ))}
           </select>
         </div>
+
         <div className="col-span-2 max-sm:col-span-1">
           <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
             Clinical Notes
@@ -78,6 +164,7 @@ export function CreateOrderForm({ patients }: { patients: Patient[] }) {
             className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700 min-h-[80px] resize-y leading-relaxed"
           />
         </div>
+
         <div>
           <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
             Assign Lab
@@ -91,24 +178,26 @@ export function CreateOrderForm({ patients }: { patients: Patient[] }) {
             sunshinelab.pisgah.eth
           </span>
         </div>
+
         <div>
           <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
             Amount
           </label>
-          <div className="flex items-center border border-gray-200 rounded-md bg-gray-50/80 overflow-hidden">
+          <div className="flex items-center border border-gray-200 rounded-md bg-gray-100 overflow-hidden">
             <span className="pl-3 pr-1 text-sm text-gray-500 shrink-0">
               &#8358;
             </span>
             <input
               type="number"
               name="amount"
-              defaultValue={5000}
-              required
-              className="w-full px-2 py-2 border-none bg-transparent text-sm outline-none"
+              value={amount}
+              readOnly
+              className="w-full px-2 py-2 border-none bg-transparent text-sm outline-none text-gray-500 cursor-default"
             />
           </div>
         </div>
       </div>
+
       <div className="mt-4 flex items-center gap-3">
         <button
           type="submit"

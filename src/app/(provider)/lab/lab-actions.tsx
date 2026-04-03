@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { collectSample, uploadResult } from "@/app/actions";
+import { collectSample, uploadResult, updateResult } from "@/app/actions";
 
 interface LabOrder {
   id: string;
@@ -9,6 +9,8 @@ interface LabOrder {
   status: string;
   patientName: string;
   clinicEns: string | null;
+  resultId: string | null;
+  rawText: string | null;
 }
 
 function formatStatus(status: string): string {
@@ -118,6 +120,76 @@ function UploadButton({
   );
 }
 
+function EditResultButton({
+  resultId,
+  currentRawText,
+}: {
+  resultId: string;
+  currentRawText: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [showForm, setShowForm] = useState(false);
+  const [rawText, setRawText] = useState(currentRawText);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  function handleSubmit() {
+    startTransition(async () => {
+      const result = await updateResult(resultId, rawText);
+      if (result.success) {
+        setShowForm(false);
+        setSuccessMessage("Result updated. AI draft will be regenerated.");
+        setTimeout(() => setSuccessMessage(null), 5000);
+      }
+    });
+  }
+
+  if (successMessage) {
+    return (
+      <span className="text-green-700 text-sm font-semibold">{successMessage}</span>
+    );
+  }
+
+  if (!showForm) {
+    return (
+      <button
+        onClick={() => setShowForm(true)}
+        className="inline-flex items-center px-3 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-[11px] tracking-widest uppercase font-medium hover:bg-gray-50 transition-colors"
+      >
+        Edit Result
+      </button>
+    );
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-md bg-white p-4 mt-3">
+      <h3 className="text-sm tracking-tight mb-3 font-semibold">Edit Result</h3>
+      <textarea
+        value={rawText}
+        onChange={(e) => setRawText(e.target.value)}
+        className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700 min-h-[100px] resize-y leading-relaxed mb-3"
+      />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSubmit}
+          disabled={isPending || !rawText.trim()}
+          className="inline-flex items-center px-4 py-2 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
+        >
+          {isPending ? "Saving..." : "Save Changes"}
+        </button>
+        <button
+          onClick={() => {
+            setShowForm(false);
+            setRawText(currentRawText);
+          }}
+          className="inline-flex items-center px-4 py-2 rounded-md border border-gray-200 bg-white text-gray-600 text-xs tracking-widest uppercase font-medium hover:bg-gray-50 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LabActions({ orders }: { orders: LabOrder[] }) {
   return (
     <>
@@ -173,6 +245,14 @@ export function LabActions({ orders }: { orders: LabOrder[] }) {
                     testType={order.testType}
                   />
                 )}
+                {(order.status === "RESULT_UPLOADED" || order.status === "DOCTOR_REVIEW") &&
+                  order.resultId &&
+                  order.rawText && (
+                    <EditResultButton
+                      resultId={order.resultId}
+                      currentRawText={order.rawText}
+                    />
+                  )}
               </td>
             </tr>
           ))}

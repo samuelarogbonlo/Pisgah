@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Overview", count: 6 },
-  { href: "/doctor", label: "Doctor", count: 2 },
+  { href: "/dashboard", label: "Overview" },
+  { href: "/doctor", label: "Doctor" },
   { href: "/patients", label: "Patients" },
-  { href: "/accounts", label: "Accounts", count: 5 },
-  { href: "/lab", label: "Lab", count: 4 },
-  { href: "/review", label: "Doctor Review", count: 1 },
+  { href: "/accounts", label: "Accounts" },
+  { href: "/lab", label: "Lab" },
+  { href: "/review", label: "Doctor Review" },
   { href: "/mini", label: "Patient UI" },
-  { href: "/pharmacy", label: "Pharmacy", count: 2 },
+  { href: "/pharmacy", label: "Pharmacy" },
 ];
 
 export default function ProviderLayout({
@@ -51,25 +51,20 @@ export default function ProviderLayout({
 
         <div className="mb-2 rounded-[6px] border border-[#d8d8d2] bg-white/84 p-2">
           <nav className="grid gap-1">
-            {NAV_ITEMS.map(({ href, label, count }) => {
+            {NAV_ITEMS.map(({ href, label }) => {
               const active = pathname === href;
 
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`flex items-center justify-between gap-2.5 rounded px-2.5 py-2 text-left transition-colors ${
+                  className={`flex items-center gap-2.5 rounded px-2.5 py-2 text-left transition-colors ${
                     active
                       ? "bg-black text-white"
                       : "text-[#161616] hover:bg-black/4"
                   }`}
                 >
                   <span className="text-[14px] font-semibold">{label}</span>
-                  {count !== undefined ? (
-                    <span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-[#e53e3e] px-1.5 text-[11px] font-semibold text-white">
-                      {count}
-                    </span>
-                  ) : null}
                 </Link>
               );
             })}

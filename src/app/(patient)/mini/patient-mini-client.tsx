@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { simulateOnlinePayment, confirmReceipt } from "@/app/actions";
 
 interface TimelineStep {
   label: string;
@@ -26,45 +27,179 @@ interface PrescriptionInfo {
     instructions?: string;
   }>;
   pharmacyEns: string | null;
+  redemptionCode: string | null;
+  status: string;
 }
 
 interface Props {
   order: OrderInfo;
   plan: PlanInfo | null;
   prescription: PrescriptionInfo | null;
+  orderId: string;
+  amount: string | null;
+  redemptionCode: string | null;
 }
 
-function RedeemButton() {
-  const [redeemed, setRedeemed] = useState(false);
+function PayNowCard({
+  orderId,
+  amount,
+  testType,
+}: {
+  orderId: string;
+  amount: string | null;
+  testType: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [paid, setPaid] = useState(false);
 
-  if (redeemed) {
+  function handlePay() {
+    startTransition(async () => {
+      await simulateOnlinePayment(orderId);
+      setPaid(true);
+      window.location.reload();
+    });
+  }
+
+  if (paid) {
     return (
-      <span className="inline-flex mt-3 px-3.5 py-2.5 rounded-full border border-[#1a7a3a] bg-[#1a7a3a] text-white text-[11px] tracking-[0.14em] uppercase">
-        Verified
-      </span>
+      <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-center">
+        <p className="text-xs text-green-700 font-semibold">
+          Payment received. Refreshing...
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-3 rounded-lg border border-gray-200 bg-white/80">
+      <p className="text-[10px] tracking-[0.22em] uppercase text-gray-500 flex items-center gap-2">
+        <span className="inline-block w-5 h-px bg-black" />
+        Payment Required
+      </p>
+      <h4 className="text-sm font-semibold mt-1.5">{testType}</h4>
+      {amount && (
+        <p className="mt-1 text-lg font-bold tracking-tight">
+          &#8358;{amount}
+        </p>
+      )}
+      <button
+        onClick={handlePay}
+        disabled={isPending}
+        className="inline-flex mt-3 px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase disabled:opacity-50"
+      >
+        {isPending ? "Processing..." : "Pay Online"}
+      </button>
+      <p className="mt-2 text-[10px] text-gray-400">
+        Or pay cash at the accounts desk
+      </p>
+    </div>
+  );
+}
+
+function RedemptionCodeCard({ code }: { code: string }) {
+  return (
+    <div className="mt-3 p-3 rounded-lg border border-gray-200 bg-white/80 text-center">
+      <p className="text-[10px] tracking-[0.22em] uppercase text-gray-500 flex items-center justify-center gap-2">
+        <span className="inline-block w-5 h-px bg-black" />
+        Your Redemption Code
+        <span className="inline-block w-5 h-px bg-black" />
+      </p>
+      <p className="mt-3 text-3xl font-mono font-bold tracking-widest">
+        {code}
+      </p>
+      <p className="mt-2 text-[10px] text-gray-400">
+        Show this code to the pharmacist or delivery rider
+      </p>
+    </div>
+  );
+}
+
+function ConfirmReceiptButton({ orderId }: { orderId: string }) {
+  const [isPending, startTransition] = useTransition();
+  const [confirmed, setConfirmed] = useState(false);
+
+  function handleConfirm() {
+    startTransition(async () => {
+      await confirmReceipt(orderId);
+      setConfirmed(true);
+    });
+  }
+
+  if (confirmed) {
+    return (
+      <div className="mt-3 p-3 rounded-lg border border-green-200 bg-green-50 text-center">
+        <p className="text-sm font-semibold text-green-700">
+          Order complete &#10003;
+        </p>
+      </div>
     );
   }
 
   return (
     <button
-      onClick={() => setRedeemed(true)}
-      className="inline-flex mt-3 px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase"
+      onClick={handleConfirm}
+      disabled={isPending}
+      className="inline-flex mt-3 px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase disabled:opacity-50"
     >
-      Verify to Redeem
+      {isPending ? "Confirming..." : "Confirm Drugs Received"}
     </button>
   );
 }
 
-export function PatientMiniClient({ order, plan, prescription }: Props) {
+function OrderCompleteMessage() {
+  return (
+    <div className="mt-3 p-3 rounded-lg border border-green-200 bg-green-50 text-center">
+      <p className="text-sm font-semibold text-green-700">
+        Order complete &#10003;
+      </p>
+    </div>
+  );
+}
+
+export function PatientMiniClient({
+  order,
+  plan,
+  prescription,
+  orderId,
+  amount,
+  redemptionCode,
+}: Props) {
   const [verified, setVerified] = useState(false);
+
+  const isAwaitingPayment = order.displayStatus === "Awaiting Payment";
+
+  const isProcessing =
+    order.displayStatus === "Paid" ||
+    order.displayStatus === "In Lab" ||
+    order.displayStatus === "Sample Collected";
+
+  const isUnderReview =
+    order.displayStatus === "Result Ready" ||
+    order.displayStatus === "Doctor Review";
 
   const isApproved =
     order.displayStatus === "Doctor Approved" ||
-    order.displayStatus === "Patient Notified" ||
-    order.displayStatus === "Completed";
+    order.displayStatus === "Patient Notified";
+
+  const isCompleted = order.displayStatus === "Completed";
+
+  const prescriptionFulfilled =
+    prescription?.status === "fulfilled" ||
+    prescription?.status === "redeemed";
 
   return (
     <>
+      {/* Pay Now card — shown before everything when awaiting payment */}
+      {isAwaitingPayment && (
+        <div className="mb-3.5">
+          <PayNowCard
+            orderId={orderId}
+            amount={amount}
+            testType={order.testType}
+          />
+        </div>
+      )}
+
       {/* Pre-verify state */}
       {!verified && (
         <>
@@ -79,7 +214,7 @@ export function PatientMiniClient({ order, plan, prescription }: Props) {
             <div className="flex gap-2 mt-2">
               <span
                 className={`inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase font-semibold border ${
-                  isApproved
+                  isApproved || isCompleted
                     ? "border-green-700 text-green-700 bg-green-50"
                     : "border-gray-200 text-gray-500 bg-white"
                 }`}
@@ -87,6 +222,18 @@ export function PatientMiniClient({ order, plan, prescription }: Props) {
                 {order.displayStatus}
               </span>
             </div>
+
+            {/* Status messages */}
+            {isProcessing && (
+              <p className="mt-3 text-xs text-gray-500">
+                Your sample is being processed
+              </p>
+            )}
+            {isUnderReview && (
+              <p className="mt-3 text-xs text-gray-500">
+                Results are being reviewed by your doctor
+              </p>
+            )}
 
             {/* Timeline */}
             <div className="mt-4 pl-4">
@@ -124,17 +271,23 @@ export function PatientMiniClient({ order, plan, prescription }: Props) {
             </div>
           </div>
 
-          <div className="mt-3.5 p-3 rounded-lg border border-gray-200 bg-white/80 text-center">
-            <p className="text-xs text-gray-500 mb-3">
-              Verify with World ID to view your results
-            </p>
-            <button
-              onClick={() => setVerified(true)}
-              className="inline-flex px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase"
-            >
-              Verify with World ID
-            </button>
-          </div>
+          {/* Verification gate — only show when approved/notified and not yet completed */}
+          {(isApproved || isCompleted) && (
+            <div className="mt-3.5 p-3 rounded-lg border border-gray-200 bg-white/80 text-center">
+              <p className="text-xs text-gray-500 mb-3">
+                Verify with World ID to view your results
+              </p>
+              <button
+                onClick={() => setVerified(true)}
+                className="inline-flex px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase"
+              >
+                Verify with World ID
+              </button>
+            </div>
+          )}
+
+          {/* Completed state — show static message */}
+          {isCompleted && <OrderCompleteMessage />}
         </>
       )}
 
@@ -191,9 +344,21 @@ export function PatientMiniClient({ order, plan, prescription }: Props) {
                   {prescription.pharmacyEns}
                 </p>
               )}
-              <RedeemButton />
+
+              {/* Redemption code replaces the old "Verify to Redeem" button */}
+              {redemptionCode && (
+                <RedemptionCodeCard code={redemptionCode} />
+              )}
+
+              {/* Confirm receipt when prescription is fulfilled/redeemed */}
+              {prescriptionFulfilled && !isCompleted && (
+                <ConfirmReceiptButton orderId={orderId} />
+              )}
             </div>
           )}
+
+          {/* Completed state in post-verify */}
+          {isCompleted && <OrderCompleteMessage />}
 
           {!plan && !prescription && (
             <div className="p-3 rounded-lg border border-gray-200 bg-white/80 text-center">

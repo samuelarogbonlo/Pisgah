@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
-import { diagnosticOrders, patients, facilities } from "@/lib/db/schema";
+import { diagnosticOrders, patients, facilities, testCatalog } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { CreateOrderForm } from "./create-order-form";
+
+const ST_LUKES_ID = "a1b2c3d4-0001-4000-8000-000000000001";
 
 function formatStatus(status: string): string {
   return status
@@ -21,25 +23,32 @@ function statusBadgeClass(status: string): string {
 }
 
 export default async function DoctorPage() {
-  const allPatients = await db
-    .select({ id: patients.id, name: patients.name })
-    .from(patients)
-    .orderBy(patients.name);
-
   const doctorId = "a1b2c3d4-0011-4000-8000-000000000011";
-  const activeOrders = await db
-    .select({
-      id: diagnosticOrders.id,
-      testType: diagnosticOrders.testType,
-      status: diagnosticOrders.status,
-      patientName: patients.name,
-      labEns: facilities.ensName,
-    })
-    .from(diagnosticOrders)
-    .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-    .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
-    .where(eq(diagnosticOrders.doctorId, doctorId))
-    .orderBy(sql`${diagnosticOrders.createdAt} desc`);
+
+  const [allPatients, catalog, activeOrders] = await Promise.all([
+    db
+      .select({ id: patients.id, name: patients.name })
+      .from(patients)
+      .orderBy(patients.name),
+    db
+      .select({ testName: testCatalog.testName, price: testCatalog.price })
+      .from(testCatalog)
+      .where(eq(testCatalog.facilityId, ST_LUKES_ID))
+      .orderBy(testCatalog.testName),
+    db
+      .select({
+        id: diagnosticOrders.id,
+        testType: diagnosticOrders.testType,
+        status: diagnosticOrders.status,
+        patientName: patients.name,
+        labEns: facilities.ensName,
+      })
+      .from(diagnosticOrders)
+      .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+      .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
+      .where(eq(diagnosticOrders.doctorId, doctorId))
+      .orderBy(sql`${diagnosticOrders.createdAt} desc`),
+  ]);
 
   return (
     <div>
@@ -61,7 +70,7 @@ export default async function DoctorPage() {
           Creating as <strong className="text-black">&nbsp;Dr. Adeyemi&nbsp;</strong>
           &middot; St. Luke&apos;s Clinic
         </div>
-        <CreateOrderForm patients={allPatients} />
+        <CreateOrderForm patients={allPatients} catalog={catalog} />
       </div>
 
       <div className="border border-gray-200 rounded-md bg-white p-4">

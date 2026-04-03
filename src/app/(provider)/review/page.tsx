@@ -111,7 +111,7 @@ export default async function ReviewPage() {
             {/* Right: Action Plan Form */}
             <ReviewForm
               orderId={order.id}
-              defaultSummary={order.aiDraft ?? ""}
+              aiDraft={order.aiDraft ?? ""}
             />
           </div>
         </div>

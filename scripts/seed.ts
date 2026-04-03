@@ -90,6 +90,7 @@ async function seed() {
   await db.delete(schema.diagnosticOrders);
   await db.delete(schema.patients);
   await db.delete(schema.facilityUsers);
+  await db.delete(schema.testCatalog);
   await db.delete(schema.facilities);
 
   console.log("Seeding facilities...");
@@ -116,6 +117,16 @@ async function seed() {
   ]);
 
   console.log("  3 facilities created");
+
+  console.log("Seeding test catalog...");
+  await db.insert(schema.testCatalog).values([
+    { facilityId: FACILITY_IDS.stLukes, testName: "Complete Blood Count", price: "5000" },
+    { facilityId: FACILITY_IDS.stLukes, testName: "Malaria RDT", price: "3500" },
+    { facilityId: FACILITY_IDS.stLukes, testName: "Urinalysis", price: "6000" },
+    { facilityId: FACILITY_IDS.stLukes, testName: "Liver Function", price: "12000" },
+    { facilityId: FACILITY_IDS.stLukes, testName: "Renal Function", price: "14000" },
+  ]);
+  console.log("  5 test catalog entries created");
 
   console.log("Seeding facility users...");
 

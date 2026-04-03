@@ -1,13 +1,14 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { dispensePrescription } from "@/app/actions";
+import { redeemPrescription } from "@/app/actions";
 
 interface Prescription {
   prescriptionId: string;
   orderId: string;
   status: string;
   attestationUid: string | null;
+  redemptionCode: string | null;
   patientName: string;
   clinicEns: string | null;
   doctorName: string;
@@ -32,15 +33,15 @@ function statusBadgeClass(status: string): string {
   return "inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase border border-gray-200 text-gray-500 bg-white";
 }
 
-function DispenseButton({
+function RedeemButton({
   prescriptionId,
-  patientName,
 }: {
   prescriptionId: string;
-  patientName: string;
 }) {
   const [isPending, startTransition] = useTransition();
   const [dispensed, setDispensed] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   if (dispensed) {
     return (
@@ -51,18 +52,38 @@ function DispenseButton({
   }
 
   return (
-    <button
-      onClick={() =>
-        startTransition(async () => {
-          await dispensePrescription(prescriptionId);
-          setDispensed(true);
-        })
-      }
-      disabled={isPending}
-      className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
-    >
-      {isPending ? "Dispensing..." : "Mark Dispensed"}
-    </button>
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={code}
+        onChange={(e) => {
+          setCode(e.target.value);
+          setError(null);
+        }}
+        placeholder="Redemption code"
+        className="px-2 py-1.5 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700 w-36"
+      />
+      <button
+        onClick={() => {
+          setError(null);
+          startTransition(async () => {
+            const result = await redeemPrescription(code);
+            if (result.error) {
+              setError(result.error);
+            } else {
+              setDispensed(true);
+            }
+          });
+        }}
+        disabled={isPending || !code.trim()}
+        className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
+      >
+        {isPending ? "Verifying..." : "Verify & Dispense"}
+      </button>
+      {error && (
+        <span className="text-red-600 text-sm">{error}</span>
+      )}
+    </div>
   );
 }
 
@@ -128,10 +149,7 @@ export function PharmacyActions({
             </td>
             <td className="py-2.5 border-b border-gray-200 text-right">
               {rx.status !== "fulfilled" && rx.status !== "redeemed" && (
-                <DispenseButton
-                  prescriptionId={rx.prescriptionId}
-                  patientName={rx.patientName}
-                />
+                <RedeemButton prescriptionId={rx.prescriptionId} />
               )}
               {(rx.status === "fulfilled" || rx.status === "redeemed") && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">

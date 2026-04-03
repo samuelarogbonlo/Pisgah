@@ -35,6 +35,7 @@ export default async function PatientMiniPage() {
       id: diagnosticOrders.id,
       testType: diagnosticOrders.testType,
       status: diagnosticOrders.status,
+      totalAmount: diagnosticOrders.totalAmount,
       patientName: patients.name,
     })
     .from(diagnosticOrders)
@@ -72,11 +73,15 @@ export default async function PatientMiniPage() {
   let rxData: {
     items: Array<{ drugName?: string; dosage?: string; quantity?: string; instructions?: string }>;
     pharmacyEns: string | null;
+    redemptionCode: string | null;
+    status: string;
   } | null = null;
   const rxRows = await db
     .select({
       items: prescriptions.items,
       pharmacyId: prescriptions.pharmacyId,
+      redemptionCode: prescriptions.redemptionCode,
+      status: prescriptions.status,
     })
     .from(prescriptions)
     .where(eq(prescriptions.orderId, order.id))
@@ -95,6 +100,8 @@ export default async function PatientMiniPage() {
     rxData = {
       items: rxRows[0].items as typeof rxData extends null ? never : NonNullable<typeof rxData>["items"],
       pharmacyEns,
+      redemptionCode: rxRows[0].redemptionCode ?? null,
+      status: rxRows[0].status,
     };
   }
 
@@ -150,6 +157,9 @@ export default async function PatientMiniPage() {
               }}
               plan={plan}
               prescription={rxData}
+              orderId={order.id}
+              amount={order.totalAmount ?? null}
+              redemptionCode={rxData?.redemptionCode ?? null}
             />
           </div>
         </div>

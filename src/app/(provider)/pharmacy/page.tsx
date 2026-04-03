@@ -6,7 +6,7 @@ import {
   facilities,
   facilityUsers,
 } from "@/lib/db/schema";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { PharmacyActions } from "./pharmacy-actions";
 
 const GREENLEAF_ID = "a1b2c3d4-0003-4000-8000-000000000003";
@@ -19,6 +19,7 @@ export default async function PharmacyPage() {
       items: prescriptions.items,
       rxStatus: prescriptions.status,
       attestationUid: prescriptions.attestationUid,
+      redemptionCode: prescriptions.redemptionCode,
       patientName: patients.name,
       clinicEns: facilities.ensName,
       doctorName: facilityUsers.name,
@@ -47,6 +48,7 @@ export default async function PharmacyPage() {
       orderId: rx.orderId,
       status: rx.rxStatus,
       attestationUid: rx.attestationUid,
+      redemptionCode: rx.redemptionCode,
       patientName: rx.patientName,
       clinicEns: rx.clinicEns,
       doctorName: rx.doctorName,

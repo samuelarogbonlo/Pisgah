@@ -68,6 +68,14 @@ export const facilities = pgTable("facilities", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const testCatalog = pgTable("test_catalog", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  facilityId: uuid("facility_id").notNull().references(() => facilities.id),
+  testName: text("test_name").notNull(),
+  price: numeric("price").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 export const facilityUsers = pgTable("facility_users", {
   id: uuid("id").defaultRandom().primaryKey(),
   facilityId: uuid("facility_id")
@@ -187,6 +195,7 @@ export const prescriptions = pgTable("prescriptions", {
   items: jsonb("items").notNull(),
   status: prescriptionStatusEnum("status").notNull(),
   attestationUid: text("attestation_uid"),
+  redemptionCode: text("redemption_code"),
   redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
@@ -211,6 +220,14 @@ export const facilitiesRelations = relations(facilities, ({ many }) => ({
   diagnosticOrders: many(diagnosticOrders, { relationName: "orderFacility" }),
   labOrders: many(diagnosticOrders, { relationName: "orderLab" }),
   prescriptions: many(prescriptions),
+  testCatalog: many(testCatalog),
+}));
+
+export const testCatalogRelations = relations(testCatalog, ({ one }) => ({
+  facility: one(facilities, {
+    fields: [testCatalog.facilityId],
+    references: [facilities.id],
+  }),
 }));
 
 export const facilityUsersRelations = relations(

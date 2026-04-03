@@ -3,14 +3,38 @@
 import { useTransition, useState } from "react";
 import { approveActionPlan } from "@/app/actions";
 
-interface ReviewFormProps {
-  orderId: string;
-  defaultSummary: string;
+interface AiDraftShape {
+  summary?: string;
+  recommendations?: string;
+  suggestedMedication?: {
+    drugName?: string;
+    dosage?: string;
+    quantity?: string;
+    instructions?: string;
+  } | null;
 }
 
-export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
+interface ReviewFormProps {
+  orderId: string;
+  aiDraft: string;
+}
+
+function parseAiDraft(raw: string): AiDraftShape {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed as AiDraftShape;
+  } catch {
+    // Backward compat: treat raw text as summary only
+    return { summary: raw };
+  }
+}
+
+export function ReviewForm({ orderId, aiDraft }: ReviewFormProps) {
   const [isPending, startTransition] = useTransition();
   const [approved, setApproved] = useState(false);
+
+  const draft = parseAiDraft(aiDraft);
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
@@ -52,7 +76,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
         </label>
         <textarea
           name="summary"
-          defaultValue={defaultSummary}
+          defaultValue={draft.summary ?? ""}
           required
           className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700 min-h-[100px] resize-y leading-relaxed"
         />
@@ -64,6 +88,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
         </label>
         <textarea
           name="recommendations"
+          defaultValue={draft.recommendations ?? ""}
           required
           placeholder="1. Start medication...&#10;2. Dietary changes...&#10;3. Follow-up..."
           className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700 min-h-[80px] resize-y leading-relaxed"
@@ -82,6 +107,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
             <input
               type="text"
               name="drugName"
+              defaultValue={draft.suggestedMedication?.drugName ?? ""}
               className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700"
             />
           </div>
@@ -92,6 +118,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
             <input
               type="text"
               name="dosage"
+              defaultValue={draft.suggestedMedication?.dosage ?? ""}
               className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700"
             />
           </div>
@@ -102,6 +129,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
             <input
               type="text"
               name="quantity"
+              defaultValue={draft.suggestedMedication?.quantity ?? ""}
               className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700"
             />
           </div>
@@ -112,6 +140,7 @@ export function ReviewForm({ orderId, defaultSummary }: ReviewFormProps) {
             <input
               type="text"
               name="instructions"
+              defaultValue={draft.suggestedMedication?.instructions ?? ""}
               className="w-full px-3 py-2 border border-gray-200 rounded-md bg-white text-sm outline-none transition-colors focus:border-gray-700"
             />
           </div>

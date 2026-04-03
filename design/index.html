@@ -1,0 +1,2075 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pisgah — Diagnostic Workflow Platform</title>
+    <style>
+      :root {
+        --bg: #f3f3f1;
+        --panel: #ffffff;
+        --panel-soft: #fafafa;
+        --ink: #000000;
+        --ink-soft: #161616;
+        --muted: #6d6d6d;
+        --line: #d8d8d2;
+        --line-strong: #b4b4ad;
+        --shadow: 0 18px 46px rgba(0, 0, 0, 0.08);
+        --shadow-soft: 0 8px 18px rgba(0, 0, 0, 0.05);
+        --radius-xl: 8px;
+        --radius-lg: 6px;
+        --radius-md: 6px;
+        --sidebar-w: 272px;
+        --green: #1a7a3a;
+        --green-bg: #e8f5ec;
+        --red: #E53E3E;
+        --amber: #D69E2E;
+        --amber-bg: #FEFCBF;
+      }
+
+      * { box-sizing: border-box; margin: 0; }
+
+      body {
+        min-height: 100vh;
+        color: var(--ink);
+        background: var(--bg);
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      body::before {
+        display: none;
+      }
+
+      /* ── Layout ── */
+      .app {
+        display: grid;
+        grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        padding: 14px 12px;
+        border-right: 1px solid rgba(0,0,0,0.08);
+        background: rgba(255,255,255,0.76);
+        backdrop-filter: blur(14px);
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .brand-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 1px solid var(--ink);
+        display: grid;
+        place-items: center;
+        font-size: 13px;
+        background: #fff;
+        flex-shrink: 0;
+      }
+
+      .brand-copy strong {
+        display: block;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .brand-copy span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .clinic-card, .nav-shell, .sidebar-note {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.84);
+      }
+
+      .clinic-card {
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .clinic-card h1 {
+        margin: 10px 0 6px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.5rem;
+        line-height: 1;
+        letter-spacing: -0.04em;
+      }
+
+      .clinic-card .ens {
+        font-family: "SF Mono", "Fira Code", "Courier New", monospace;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .label::before {
+        content: "";
+        width: 20px;
+        height: 1px;
+        background: var(--ink);
+      }
+
+      .nav-shell {
+        padding: 8px;
+        margin-bottom: 10px;
+      }
+
+      .nav-group { display: grid; gap: 4px; }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 4px;
+        color: var(--ink-soft);
+        cursor: pointer;
+        transition: background 160ms ease;
+        border: none;
+        background: none;
+        font-family: inherit;
+        font-size: inherit;
+        text-align: left;
+        width: 100%;
+      }
+
+      .nav-item:hover {
+        background: rgba(0,0,0,0.04);
+      }
+
+      .nav-item.active {
+        background: #000;
+        color: #fff;
+      }
+
+      .nav-name { font-size: 14px; font-weight: 600; }
+
+      .nav-count {
+        min-width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 600;
+        flex-shrink: 0;
+        background: var(--red);
+        color: #fff;
+        border: none;
+        padding: 0 6px;
+      }
+
+      .nav-item.active .nav-count {
+        background: var(--red);
+        color: #fff;
+      }
+
+      .sidebar-note {
+        padding: 12px;
+        margin-top: auto;
+      }
+
+      .sidebar-note p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 12px;
+      }
+
+      /* ── Main ── */
+      .main { padding: 16px 20px; }
+
+      .view { display: none; }
+      .view.active { display: block; }
+
+      /* ── Shared Components ── */
+      .view-header {
+        margin-bottom: 16px;
+      }
+
+      .view-header h2 {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(1.8rem, 3vw, 2.4rem);
+        letter-spacing: -0.05em;
+        line-height: 1;
+        margin: 12px 0 0;
+      }
+
+      .view-header p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .ens {
+        font-family: "SF Mono", "Fira Code", "Courier New", monospace;
+        font-size: 12px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        background: rgba(255,255,255,0.9);
+        padding: 16px;
+      }
+
+      .panel + .panel { margin-top: 12px; }
+
+      .panel h3 {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.3rem;
+        letter-spacing: -0.03em;
+        margin: 0 0 12px;
+      }
+
+      .tag {
+        display: inline-block;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: #fff;
+      }
+
+      .tag-green {
+        border-color: var(--green);
+        color: var(--green);
+        background: var(--green-bg);
+      }
+
+      .tag-amber {
+        border-color: var(--amber);
+        color: #92600a;
+        background: var(--amber-bg);
+        font-weight: 600;
+      }
+
+      .tag-muted {
+        border-color: var(--line);
+        color: var(--line-strong);
+        background: var(--panel-soft);
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: #fff;
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .badge-chain {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 11px;
+        color: var(--muted);
+        background: #fff;
+        letter-spacing: 0.06em;
+      }
+
+      .badge-chain::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+        flex-shrink: 0;
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--ink);
+        background: #000;
+        color: #fff;
+        font-size: 12px;
+        font-family: inherit;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: background 160ms ease;
+      }
+
+      .btn:hover {
+        background: #222;
+      }
+
+      .btn:active { background: #000; }
+
+      .btn-sm {
+        padding: 6px 12px;
+        font-size: 11px;
+      }
+
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      /* ── Tables ── */
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .data-table th {
+        text-align: left;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0 10px 10px 0;
+        border-bottom: 1px solid var(--line);
+        font-weight: 500;
+      }
+
+      .data-table td {
+        padding: 10px 10px 10px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        vertical-align: middle;
+      }
+
+      .data-table tr:last-child td { border-bottom: none; }
+
+      .data-table tr.clickable-row {
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+
+      .data-table tr.clickable-row:hover {
+        background: rgba(0,0,0,0.02);
+      }
+
+      .data-table tr.clickable-row.selected-row {
+        background: rgba(0,0,0,0.03);
+      }
+
+      /* ── Forms ── */
+      .form-group { margin-bottom: 12px; }
+
+      .form-label {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .form-input, .form-select, .form-textarea {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        font-family: inherit;
+        font-size: 14px;
+        color: var(--ink);
+        outline: none;
+        transition: border-color 160ms ease;
+      }
+
+      .form-input:focus, .form-select:focus, .form-textarea:focus {
+        border-color: var(--ink);
+      }
+
+      .form-textarea {
+        min-height: 80px;
+        resize: vertical;
+        line-height: 1.6;
+      }
+
+      .form-readonly {
+        background: #f0f0ee;
+        color: var(--muted);
+        cursor: default;
+      }
+
+      .naira-input {
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        overflow: hidden;
+      }
+
+      .naira-input span {
+        padding: 8px 0 8px 12px;
+        color: var(--muted);
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+
+      .naira-input input {
+        border: none;
+        background: transparent;
+        padding: 8px 12px 8px 4px;
+        font-family: inherit;
+        font-size: 14px;
+        color: var(--ink);
+        outline: none;
+        width: 100%;
+      }
+
+      /* ── Stats Row ── */
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .stat {
+        padding: 12px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+      }
+
+      .stat strong {
+        display: block;
+        margin-bottom: 6px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.6rem;
+        letter-spacing: -0.04em;
+      }
+
+      .stat span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      /* ── Phone Frame ── */
+      .phone-shell-wrapper {
+        display: flex;
+        justify-content: center;
+        padding-top: 20px;
+      }
+
+      .phone-shell {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.9);
+        padding: 14px;
+        display: inline-block;
+      }
+
+      .phone-head {
+        padding: 0 6px 16px;
+      }
+
+      .phone-head h3 {
+        margin: 12px 0 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.3rem;
+        letter-spacing: -0.03em;
+      }
+
+      .phone-frame {
+        max-width: 310px;
+        padding: 12px;
+        border-radius: 34px;
+        border: 1px solid rgba(0,0,0,0.1);
+        background: #111;
+        box-shadow: var(--shadow);
+      }
+
+      .phone-bar {
+        width: 120px;
+        height: 5px;
+        margin: 2px auto 18px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.2);
+      }
+
+      .phone-screen {
+        padding: 18px;
+        min-height: 540px;
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at top, rgba(0,0,0,0.06), transparent 26%),
+          linear-gradient(180deg, #fff 0%, #f5f5f5 100%);
+      }
+
+      .phone-header {
+        text-align: center;
+        margin-bottom: 20px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .phone-header strong {
+        display: block;
+        font-size: 15px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .phone-header span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .mini-card {
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.86);
+      }
+
+      .mini-card + .mini-card { margin-top: 12px; }
+
+      .mini-card h4 {
+        margin: 6px 0 6px;
+        font-size: 14px;
+      }
+
+      .mini-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .mini-button {
+        display: inline-flex;
+        margin-top: 12px;
+        padding: 11px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--ink);
+        background: #000;
+        color: #fff;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        cursor: pointer;
+        font-family: inherit;
+      }
+
+      /* ── Timeline ── */
+      .timeline {
+        margin: 16px 0;
+        padding-left: 16px;
+      }
+
+      .timeline-step {
+        position: relative;
+        padding: 0 0 18px 20px;
+      }
+
+      .timeline-step:last-child { padding-bottom: 0; }
+
+      .timeline-step::before {
+        content: "";
+        position: absolute;
+        left: -1px;
+        top: 6px;
+        bottom: -6px;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .timeline-step:last-child::before { display: none; }
+
+      .timeline-step::after {
+        content: "";
+        position: absolute;
+        left: -5px;
+        top: 5px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1.5px solid var(--line-strong);
+        background: #fff;
+      }
+
+      .timeline-step.done::after {
+        background: var(--ink);
+        border-color: var(--ink);
+      }
+
+      .timeline-step.done::before {
+        background: var(--ink);
+      }
+
+      .timeline-step.current::after {
+        background: #fff;
+        border-color: var(--ink);
+        border-width: 2.5px;
+      }
+
+      .timeline-step span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .timeline-step.done span {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .timeline-step.current span {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      /* ── Order Detail Panel ── */
+      .order-detail-panel {
+        margin-top: 14px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.94);
+      }
+
+      .order-detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .order-detail-header h3 {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.3rem;
+        letter-spacing: -0.03em;
+        margin: 0 0 8px;
+      }
+
+      .order-detail-meta {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+
+      .order-detail-meta .meta-item {
+        font-size: 13px;
+      }
+
+      .order-detail-meta .meta-item .meta-label {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      .order-detail-close {
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        font-size: 16px;
+        color: var(--muted);
+        transition: background 120ms ease;
+        flex-shrink: 0;
+      }
+
+      .order-detail-close:hover {
+        background: rgba(0,0,0,0.04);
+      }
+
+      .detail-timeline {
+        padding: 0;
+        list-style: none;
+      }
+
+      .detail-timeline-step {
+        position: relative;
+        padding: 0 0 24px 32px;
+      }
+
+      .detail-timeline-step:last-child { padding-bottom: 0; }
+
+      .detail-timeline-step::before {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 14px;
+        bottom: 0;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .detail-timeline-step:last-child::before { display: none; }
+
+      .detail-timeline-step::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 5px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        border: 2px solid var(--line-strong);
+        background: #fff;
+      }
+
+      .detail-timeline-step.done::after {
+        background: var(--ink);
+        border-color: var(--ink);
+      }
+
+      .detail-timeline-step.done::before {
+        background: var(--ink);
+      }
+
+      .detail-timeline-step.current::after {
+        background: #fff;
+        border-color: var(--ink);
+        border-width: 3px;
+      }
+
+      .detail-timeline-step .step-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .detail-timeline-step.pending .step-name {
+        font-weight: 400;
+        color: var(--muted);
+      }
+
+      .detail-timeline-step .step-info {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      /* ── Review Layout ── */
+      .review-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .workspace {
+        padding: 14px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+      }
+
+      .workspace h4 {
+        margin: 0 0 12px;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .workspace p {
+        margin: 0 0 14px;
+        color: var(--ink-soft);
+        line-height: 1.72;
+        font-size: 14px;
+      }
+
+      .annotation {
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line-strong);
+        background: #fff;
+        margin-top: 14px;
+      }
+
+      .annotation strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--muted);
+      }
+
+      .annotation span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      /* ── Success State ── */
+      .success-msg {
+        padding: 14px;
+        border-radius: 6px;
+        border: 1px solid var(--green);
+        background: var(--green-bg);
+        margin-top: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .success-msg span {
+        color: var(--green);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      /* ── Summary Box ── */
+      .summary-box {
+        padding: 14px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        margin-top: 18px;
+      }
+
+      .summary-box .row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        font-size: 14px;
+      }
+
+      .summary-box .row + .row {
+        border-top: 1px solid var(--line);
+      }
+
+      .summary-box .row strong { font-family: Georgia, serif; }
+
+      .confirmed-text {
+        color: var(--green) !important;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      /* ── Doctor Context Info ── */
+      .doctor-context {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        margin-bottom: 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .doctor-context strong {
+        color: var(--ink);
+      }
+
+      /* ── Search Bar ── */
+      .search-bar {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        font-family: inherit;
+        font-size: 14px;
+        color: var(--ink);
+        outline: none;
+        transition: border-color 160ms ease;
+        margin-bottom: 14px;
+      }
+
+      .search-bar:focus {
+        border-color: var(--ink);
+      }
+
+      /* ── Patient Detail Expand ── */
+      .patient-expand {
+        padding: 14px 16px;
+        background: var(--panel-soft);
+        border-top: 1px solid var(--line);
+      }
+
+      .patient-expand-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px 32px;
+        margin-bottom: 18px;
+      }
+
+      .patient-expand-grid .meta-item .meta-label {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      .patient-expand-grid .meta-item {
+        font-size: 13px;
+      }
+
+      /* ── Fade Animations ── */
+      .fade-up {
+        opacity: 1;
+        transform: none;
+      }
+      .d1 { animation-delay: 0s; }
+      .d2 { animation-delay: 0s; }
+      .d3 { animation-delay: 0s; }
+
+      @keyframes fade-up {
+        to { opacity: 1; transform: none; }
+      }
+
+      .hidden { display: none !important; }
+
+      /* ── Responsive ── */
+      @media (max-width: 1280px) {
+        .stats-row { grid-template-columns: repeat(2, 1fr); }
+        .review-layout { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 1080px) {
+        .app { grid-template-columns: 1fr; }
+        .sidebar {
+          position: relative;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid rgba(0,0,0,0.08);
+        }
+      }
+
+      @media (max-width: 760px) {
+        .main { padding: 14px; }
+        .stats-row { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+
+      <!-- ════════════════ SIDEBAR ════════════════ -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">P</div>
+          <div class="brand-copy">
+            <strong>Pisgah</strong>
+            <span>Diagnostic workflow</span>
+          </div>
+        </div>
+
+        <div class="clinic-card">
+          <div class="label">Current Context</div>
+          <h1>St. Luke's Clinic</h1>
+          <span class="ens">stlukes.pisgah.eth</span>
+        </div>
+
+        <div class="nav-shell">
+          <div class="nav-group">
+            <button class="nav-item active" data-view="overview" onclick="switchView('overview', this)">
+              <span class="nav-name">Overview</span>
+              <span class="nav-count">6</span>
+            </button>
+            <button class="nav-item" data-view="doctor" onclick="switchView('doctor', this)">
+              <span class="nav-name">Doctor</span>
+              <span class="nav-count">2</span>
+            </button>
+            <button class="nav-item" data-view="patients" onclick="switchView('patients', this)">
+              <span class="nav-name">Patients</span>
+            </button>
+            <button class="nav-item" data-view="accounts" onclick="switchView('accounts', this)">
+              <span class="nav-name">Accounts</span>
+              <span class="nav-count">5</span>
+            </button>
+            <button class="nav-item" data-view="lab" onclick="switchView('lab', this)">
+              <span class="nav-name">Lab</span>
+              <span class="nav-count">4</span>
+            </button>
+            <button class="nav-item" data-view="review" onclick="switchView('review', this)">
+              <span class="nav-name">Doctor Review</span>
+              <span class="nav-count">1</span>
+            </button>
+            <button class="nav-item" data-view="patient" onclick="switchView('patient', this)">
+              <span class="nav-name">Patient UI</span>
+            </button>
+            <button class="nav-item" data-view="pharmacy" onclick="switchView('pharmacy', this)">
+              <span class="nav-name">Pharmacy</span>
+              <span class="nav-count">2</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidebar-note">
+          <div class="label">Product Rule</div>
+          <p>Automate coordination, not medical judgment.</p>
+        </div>
+      </aside>
+
+      <!-- ════════════════ MAIN CONTENT ════════════════ -->
+      <main class="main">
+
+        <!-- ──── OVERVIEW ──── -->
+        <div id="view-overview" class="view active">
+          <div class="view-header fade-up d1">
+            <div class="label">Operational Dashboard</div>
+            <h2>Today at St. Luke's</h2>
+          </div>
+
+          <div class="stats-row fade-up d2">
+            <div class="stat">
+              <strong>3</strong>
+              <span>Active Orders</span>
+            </div>
+            <div class="stat">
+              <strong>1</strong>
+              <span>Awaiting Review</span>
+            </div>
+            <div class="stat">
+              <strong>5</strong>
+              <span>Completed Today</span>
+            </div>
+            <div class="stat">
+              <strong>&#8358;48,500</strong>
+              <span>Billed Today</span>
+            </div>
+          </div>
+
+          <div class="panel fade-up d3">
+            <h3 style="margin-bottom:20px;">All Orders</h3>
+            <table class="data-table" id="orders-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Test Type</th>
+                  <th>Doctor</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="clickable-row" onclick="showOrderDetail(0, this)">
+                  <td><strong>Amara Okafor</strong></td>
+                  <td>Complete Blood Count</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag tag-amber">Doctor Review</span></td>
+                  <td style="white-space:nowrap;">Today, 10:07</td>
+                </tr>
+                <tr class="clickable-row" onclick="showOrderDetail(1, this)">
+                  <td><strong>Emeka Nwankwo</strong></td>
+                  <td>Malaria RDT</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag">In Lab</span></td>
+                  <td style="white-space:nowrap;">Today, 09:15</td>
+                </tr>
+                <tr class="clickable-row" onclick="showOrderDetail(2, this)">
+                  <td><strong>Fatima Bello</strong></td>
+                  <td>Liver Function</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag">Awaiting Payment</span></td>
+                  <td style="white-space:nowrap;">Today, 08:45</td>
+                </tr>
+                <tr class="clickable-row" onclick="showOrderDetail(3, this)">
+                  <td><strong>Chidi Okonkwo</strong></td>
+                  <td>Urinalysis</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag tag-muted">Completed &#10003;</span></td>
+                  <td>Yesterday</td>
+                </tr>
+                <tr class="clickable-row" onclick="showOrderDetail(4, this)">
+                  <td><strong>Ngozi Eze</strong></td>
+                  <td>Renal Function</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag">Patient Notified</span></td>
+                  <td>Yesterday</td>
+                </tr>
+                <tr class="clickable-row" onclick="showOrderDetail(5, this)">
+                  <td><strong>Blessing Adamu</strong></td>
+                  <td>Malaria RDT</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="tag">Ready for Pickup</span></td>
+                  <td style="white-space:nowrap;">Today, 11:30</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div id="order-detail-container"></div>
+          </div>
+        </div>
+
+        <!-- ──── DOCTOR ──── -->
+        <div id="view-doctor" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Doctor Workspace</div>
+            <h2>Dr. Adeyemi</h2>
+          </div>
+
+          <div class="panel fade-up d2" style="margin-bottom:18px;">
+            <h3>Create Order</h3>
+            <div class="doctor-context">
+              Creating as <strong>&nbsp;Dr. Adeyemi&nbsp;</strong> &middot; St. Luke's Clinic
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px 24px;">
+              <div class="form-group">
+                <label class="form-label">Patient</label>
+                <select class="form-select">
+                  <option>Amara Okafor</option>
+                  <option>Emeka Nwankwo</option>
+                  <option>Fatima Bello</option>
+                  <option>Chidi Okonkwo</option>
+                  <option>Ngozi Eze</option>
+                  <option>Blessing Adamu</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Test Type</label>
+                <select class="form-select">
+                  <option>Complete Blood Count</option>
+                  <option>Malaria RDT</option>
+                  <option>Urinalysis</option>
+                  <option>Liver Function</option>
+                  <option>Renal Function</option>
+                </select>
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label class="form-label">Clinical Notes</label>
+                <textarea class="form-textarea" placeholder="Patient presents with..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Assign Lab</label>
+                <input class="form-input form-readonly" value="Sunshine Diagnostics Lab" readonly />
+                <span class="ens" style="display:block;margin-top:6px;color:var(--muted);">sunshinelab.pisgah.eth</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Amount</label>
+                <div class="naira-input">
+                  <span>&#8358;</span>
+                  <input type="number" value="5000" />
+                </div>
+              </div>
+            </div>
+            <button class="btn" onclick="this.textContent='Order Created';this.disabled=true;setTimeout(()=>{this.textContent='Create Order';this.disabled=false;},2000);">Create Order</button>
+          </div>
+
+          <div class="panel fade-up d3">
+            <h3>Active Orders</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Test</th>
+                  <th>Status</th>
+                  <th>Lab</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Amara Okafor</td>
+                  <td>CBC</td>
+                  <td><span class="tag tag-amber">Doctor Review</span></td>
+                  <td><span class="ens">sunshinelab.pisgah.eth</span></td>
+                </tr>
+                <tr>
+                  <td>Emeka Nwankwo</td>
+                  <td>Malaria RDT</td>
+                  <td><span class="tag">In Lab</span></td>
+                  <td><span class="ens">sunshinelab.pisgah.eth</span></td>
+                </tr>
+                <tr>
+                  <td>Fatima Bello</td>
+                  <td>Liver Function</td>
+                  <td><span class="tag">Awaiting Payment</span></td>
+                  <td><span class="ens">sunshinelab.pisgah.eth</span></td>
+                </tr>
+                <tr>
+                  <td>Blessing Adamu</td>
+                  <td>Malaria RDT</td>
+                  <td><span class="tag">Ready for Pickup</span></td>
+                  <td><span class="ens">sunshinelab.pisgah.eth</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ──── PATIENTS ──── -->
+        <div id="view-patients" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Patient Registry</div>
+            <h2>Patients</h2>
+          </div>
+
+          <div class="panel fade-up d2">
+            <input type="text" class="search-bar" id="patient-search" placeholder="Search patients by name or phone..." onkeyup="filterPatients()" />
+            <table class="data-table" id="patients-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Registered</th>
+                  <th>Orders</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 0)">
+                  <td><strong>Amara Okafor</strong></td>
+                  <td>+234 801 234 5678</td>
+                  <td>3 Apr 2026</td>
+                  <td>2</td>
+                </tr>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 1)">
+                  <td><strong>Emeka Nwankwo</strong></td>
+                  <td>+234 802 345 6789</td>
+                  <td>2 Apr 2026</td>
+                  <td>1</td>
+                </tr>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 2)">
+                  <td><strong>Fatima Bello</strong></td>
+                  <td>+234 803 456 7890</td>
+                  <td>1 Apr 2026</td>
+                  <td>1</td>
+                </tr>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 3)">
+                  <td><strong>Chidi Okonkwo</strong></td>
+                  <td>+234 804 567 8901</td>
+                  <td>28 Mar 2026</td>
+                  <td>3</td>
+                </tr>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 4)">
+                  <td><strong>Ngozi Eze</strong></td>
+                  <td>+234 805 678 9012</td>
+                  <td>25 Mar 2026</td>
+                  <td>1</td>
+                </tr>
+                <tr class="clickable-row" onclick="togglePatientExpand(this, 5)">
+                  <td><strong>Blessing Adamu</strong></td>
+                  <td>+234 806 789 0123</td>
+                  <td>20 Mar 2026</td>
+                  <td>2</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ──── ACCOUNTS ──── -->
+        <div id="view-accounts" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Accounts Desk</div>
+            <h2>Mrs. Obi</h2>
+          </div>
+
+          <div class="panel fade-up d2">
+            <h3>Pending Payments</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Test</th>
+                  <th>Amount</th>
+                  <th>Date</th>
+                  <th style="text-align:right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Amara Okafor</strong></td>
+                  <td>CBC</td>
+                  <td>&#8358;5,000</td>
+                  <td>Today</td>
+                  <td style="text-align:right;"><button class="btn btn-sm" onclick="confirmPayment(this, 5000)">Confirm Payment</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Emeka Nwankwo</strong></td>
+                  <td>Malaria RDT</td>
+                  <td>&#8358;3,000</td>
+                  <td>Today</td>
+                  <td style="text-align:right;"><button class="btn btn-sm" onclick="confirmPayment(this, 3000)">Confirm Payment</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Fatima Bello</strong></td>
+                  <td>Liver Function</td>
+                  <td>&#8358;8,500</td>
+                  <td>Yesterday</td>
+                  <td style="text-align:right;"><button class="btn btn-sm" onclick="confirmPayment(this, 8500)">Confirm Payment</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Chidi Okonkwo</strong></td>
+                  <td>Urinalysis</td>
+                  <td>&#8358;4,000</td>
+                  <td>Yesterday</td>
+                  <td style="text-align:right;"><button class="btn btn-sm" onclick="confirmPayment(this, 4000)">Confirm Payment</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Ngozi Eze</strong></td>
+                  <td>Renal Function</td>
+                  <td>&#8358;7,500</td>
+                  <td>Yesterday</td>
+                  <td style="text-align:right;"><button class="btn btn-sm" onclick="confirmPayment(this, 7500)">Confirm Payment</button></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="summary-box">
+              <div class="row">
+                <span>Total Billed</span>
+                <strong>&#8358;28,000</strong>
+              </div>
+              <div class="row">
+                <span>Confirmed</span>
+                <strong id="confirmed-total">&#8358;0</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ──── LAB ──── -->
+        <div id="view-lab" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Lab Dashboard</div>
+            <h2>Sunshine Diagnostics</h2>
+            <p class="ens" style="margin-top:4px;">sunshinelab.pisgah.eth</p>
+          </div>
+
+          <div class="panel fade-up d2">
+            <h3>Incoming Orders</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Test</th>
+                  <th>Referring Clinic</th>
+                  <th>Status</th>
+                  <th style="text-align:right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="lab-row-1">
+                  <td><strong>Amara Okafor</strong></td>
+                  <td>CBC</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td id="lab-status-1"><span class="tag">Received</span></td>
+                  <td style="text-align:right;" id="lab-action-1">
+                    <button class="btn btn-sm" onclick="labCollect()">Collect Sample</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Emeka Nwankwo</strong></td>
+                  <td>Malaria RDT</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td><span class="tag">Processing</span></td>
+                  <td style="text-align:right;"></td>
+                </tr>
+                <tr>
+                  <td><strong>Fatima Bello</strong></td>
+                  <td>Liver Function</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td><span class="tag">Received</span></td>
+                  <td style="text-align:right;"></td>
+                </tr>
+                <tr>
+                  <td><strong>Blessing Adamu</strong></td>
+                  <td>Malaria RDT</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td><span class="tag tag-green">Result Uploaded</span></td>
+                  <td style="text-align:right;"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="lab-result-section" class="panel fade-up hidden" style="margin-top:18px;">
+            <h3>Upload Result</h3>
+            <div class="form-group">
+              <label class="form-label">Patient: Amara Okafor / CBC</label>
+              <textarea class="form-textarea" id="lab-result-text" style="min-height:100px;">WBC: 6,800/&#956;L | RBC: 4.2M/&#956;L | Hemoglobin: 11.2 g/dL | Hematocrit: 34% | Platelets: 245,000/&#956;L | MCV: 81 fL | MCH: 26.7 pg | Neutrophils: 58% | Lymphocytes: 32%</textarea>
+            </div>
+            <button class="btn" onclick="labSubmit()">Submit Result</button>
+          </div>
+
+          <div id="lab-success" class="hidden" style="margin-top:18px;">
+            <div class="success-msg">
+              <span>Result uploaded. AI draft will be generated.</span>
+              <span class="badge-chain">Verified on World Chain</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ──── DOCTOR REVIEW ──── -->
+        <div id="view-review" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Doctor Review</div>
+            <h2>Review and Approve</h2>
+            <p>Amara Okafor / Complete Blood Count</p>
+          </div>
+
+          <div class="review-layout fade-up d2">
+            <div class="workspace">
+              <h4>Raw Result</h4>
+              <p style="font-family:'SF Mono','Fira Code','Courier New',monospace;font-size:13px;line-height:1.8;">
+                WBC: 6,800/&#956;L<br/>
+                RBC: 4.2M/&#956;L<br/>
+                Hemoglobin: 11.2 g/dL<br/>
+                Hematocrit: 34%<br/>
+                Platelets: 245,000/&#956;L<br/>
+                MCV: 81 fL<br/>
+                MCH: 26.7 pg<br/>
+                Neutrophils: 58%<br/>
+                Lymphocytes: 32%
+              </p>
+
+              <div style="border-top:1px solid var(--line);padding-top:18px;margin-top:18px;">
+                <h4>AI Draft</h4>
+                <p>
+                  CBC results show hemoglobin at 11.2 g/dL (mildly low), WBC 6,800/&#956;L (normal range),
+                  platelet count 245,000/&#956;L (normal). Mild anemia noted. Consider iron supplementation
+                  and dietary counseling. Follow-up CBC recommended in 8 weeks.
+                </p>
+                <div class="annotation">
+                  <strong>Drafted by</strong>
+                  <span class="ens">assistant.stlukes.pisgah.eth</span>
+                  <span style="display:block;margin-top:4px;font-size:12px;">Human-backed clinic assistant</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="workspace">
+              <h4>Doctor's Action Plan</h4>
+              <div class="form-group">
+                <label class="form-label">Summary</label>
+                <textarea class="form-textarea" style="min-height:100px;">CBC results show hemoglobin at 11.2 g/dL (mildly low), WBC 6,800/&#956;L (normal range), platelet count 245,000/&#956;L (normal). Mild anemia noted. Consider iron supplementation and dietary counseling. Follow-up CBC recommended in 8 weeks.</textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Recommendations</label>
+                <textarea class="form-textarea" style="min-height:80px;">1. Start Ferrous Sulfate 200mg twice daily
+2. Dietary counseling on iron-rich foods
+3. Follow-up CBC in 8 weeks</textarea>
+              </div>
+
+              <div style="border-top:1px solid var(--line);padding-top:18px;margin-top:4px;">
+                <h4 style="margin-bottom:14px;">Prescription</h4>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;">
+                  <div class="form-group">
+                    <label class="form-label">Drug Name</label>
+                    <input class="form-input" value="Ferrous Sulfate" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Dosage</label>
+                    <input class="form-input" value="200mg twice daily" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Quantity</label>
+                    <input class="form-input" value="60 tablets" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Instructions</label>
+                    <input class="form-input" value="Take with vitamin C, avoid tea/coffee" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Pharmacy</label>
+                  <input class="form-input form-readonly" value="GreenLeaf Pharmacy" readonly />
+                  <span class="ens" style="display:block;margin-top:6px;color:var(--muted);">greenleaf.pisgah.eth</span>
+                </div>
+              </div>
+
+              <button class="btn" id="approve-btn" onclick="approveReview()">Approve Action Plan</button>
+            </div>
+          </div>
+
+          <div id="review-success" class="hidden" style="margin-top:18px;">
+            <div class="success-msg">
+              <span>Action plan approved. Patient and pharmacy notified.</span>
+              <span class="badge-chain">Verified on World Chain</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ──── PATIENT UI ──── -->
+        <div id="view-patient" class="view">
+          <div class="phone-shell-wrapper fade-up d1">
+            <div class="phone-shell">
+              <div class="phone-head">
+                <div class="label">Patient Mini App</div>
+                <h3>Verified release surface</h3>
+              </div>
+              <div class="phone-frame">
+                <div class="phone-bar"></div>
+                <div class="phone-screen">
+                  <div class="phone-header">
+                    <strong>Pisgah</strong>
+                    <span>Amara Okafor</span>
+                  </div>
+
+                  <div id="patient-pre-verify">
+                    <div class="mini-card">
+                      <div class="label">Order</div>
+                      <h4>Complete Blood Count</h4>
+                      <div style="display:flex;gap:8px;margin-top:8px;">
+                        <span class="tag tag-green">Doctor Approved</span>
+                      </div>
+
+                      <div class="timeline">
+                        <div class="timeline-step done"><span>Ordered</span></div>
+                        <div class="timeline-step done"><span>Paid</span></div>
+                        <div class="timeline-step done"><span>In Lab</span></div>
+                        <div class="timeline-step done"><span>Result Ready</span></div>
+                        <div class="timeline-step done"><span>Doctor Approved</span></div>
+                      </div>
+                    </div>
+
+                    <div class="mini-card" style="margin-top:14px;text-align:center;">
+                      <p style="margin-bottom:12px;">Verify with World ID to view your results</p>
+                      <button class="mini-button" onclick="patientVerify()">Verify with World ID</button>
+                    </div>
+                  </div>
+
+                  <div id="patient-post-verify" class="hidden">
+                    <div class="mini-card">
+                      <div class="label">Doctor Summary</div>
+                      <h4>Mild anemia detected</h4>
+                      <p style="margin-top:6px;">
+                        CBC shows hemoglobin at 11.2 g/dL (mildly low). Other values normal.
+                        Iron supplementation and dietary changes recommended.
+                      </p>
+                    </div>
+
+                    <div class="mini-card">
+                      <div class="label">Recommendations</div>
+                      <h4>Next steps</h4>
+                      <p style="margin-top:6px;">
+                        1. Ferrous Sulfate 200mg twice daily<br/>
+                        2. Eat iron-rich foods (leafy greens, beans)<br/>
+                        3. Follow-up CBC in 8 weeks
+                      </p>
+                    </div>
+
+                    <div class="mini-card">
+                      <div class="label">Prescription</div>
+                      <h4>Ferrous Sulfate 200mg</h4>
+                      <p style="margin-top:4px;">
+                        60 tablets, twice daily with vitamin C
+                      </p>
+                      <p style="margin-top:8px;" class="ens">greenleaf.pisgah.eth</p>
+                      <button class="mini-button" style="margin-top:12px;" onclick="this.textContent='Verified';this.style.background='var(--green)';this.style.borderColor='var(--green)';">Verify to Redeem</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ──── PHARMACY ──── -->
+        <div id="view-pharmacy" class="view">
+          <div class="view-header fade-up d1">
+            <div class="label">Pharmacy Dashboard</div>
+            <h2>GreenLeaf Pharmacy</h2>
+            <p class="ens" style="margin-top:4px;">greenleaf.pisgah.eth</p>
+          </div>
+
+          <div class="panel fade-up d2">
+            <h3>Pending Prescriptions</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Medication</th>
+                  <th>Doctor</th>
+                  <th>Facility</th>
+                  <th>Status</th>
+                  <th style="text-align:right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="pharm-row-1">
+                  <td><strong>Amara Okafor</strong></td>
+                  <td>Ferrous Sulfate 200mg</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td id="pharm-status-1"><span class="tag">Ready for Pickup</span></td>
+                  <td style="text-align:right;" id="pharm-action-1">
+                    <button class="btn btn-sm" onclick="dispenseRx()">Mark Dispensed</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Blessing Adamu</strong></td>
+                  <td>Chloroquine 250mg</td>
+                  <td>Dr. Adeyemi</td>
+                  <td><span class="ens">stlukes.pisgah.eth</span></td>
+                  <td><span class="tag">Ready for Pickup</span></td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-sm" onclick="this.parentElement.innerHTML='<span class=\'confirmed-text\'>Dispensed &#10003;</span>';">Mark Dispensed</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="pharm-success" class="hidden" style="margin-top:18px;">
+            <div class="success-msg">
+              <span>Prescription dispensed to Amara Okafor.</span>
+              <span class="badge-chain">Verified on World Chain</span>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+
+    <script>
+      function switchView(viewId, btn) {
+        document.querySelectorAll('.view').forEach(function(v) {
+          v.classList.remove('active');
+        });
+        document.getElementById('view-' + viewId).classList.add('active');
+
+        document.querySelectorAll('.nav-item').forEach(function(n) {
+          n.classList.remove('active');
+        });
+        btn.classList.add('active');
+
+        var target = document.getElementById('view-' + viewId);
+        target.querySelectorAll('.fade-up').forEach(function(el) {
+          el.style.animation = 'none';
+          el.offsetHeight;
+          el.style.animation = '';
+        });
+      }
+
+      var confirmedAmount = 0;
+
+      function confirmPayment(btn, amount) {
+        var actionCell = btn.parentElement;
+        actionCell.innerHTML = '<span class="confirmed-text">Confirmed &#10003;</span>';
+        confirmedAmount += amount;
+        document.getElementById('confirmed-total').textContent =
+          '\u20A6' + confirmedAmount.toLocaleString();
+      }
+
+      function labCollect() {
+        document.getElementById('lab-status-1').innerHTML =
+          '<span class="tag tag-green">Sample Collected</span>';
+        document.getElementById('lab-action-1').innerHTML =
+          '<button class="btn btn-sm" onclick="labUpload()">Upload Result</button>';
+      }
+
+      function labUpload() {
+        document.getElementById('lab-status-1').innerHTML =
+          '<span class="tag">Uploading</span>';
+        document.getElementById('lab-action-1').innerHTML = '';
+        document.getElementById('lab-result-section').classList.remove('hidden');
+      }
+
+      function labSubmit() {
+        document.getElementById('lab-result-section').classList.add('hidden');
+        document.getElementById('lab-success').classList.remove('hidden');
+        document.getElementById('lab-status-1').innerHTML =
+          '<span class="tag tag-green">Result Uploaded</span>';
+      }
+
+      function approveReview() {
+        document.getElementById('approve-btn').textContent = 'Approved';
+        document.getElementById('approve-btn').disabled = true;
+        document.getElementById('review-success').classList.remove('hidden');
+      }
+
+      function patientVerify() {
+        document.getElementById('patient-pre-verify').classList.add('hidden');
+        document.getElementById('patient-post-verify').classList.remove('hidden');
+      }
+
+      function dispenseRx() {
+        document.getElementById('pharm-status-1').innerHTML =
+          '<span class="tag tag-green">Dispensed &#10003;</span>';
+        document.getElementById('pharm-action-1').innerHTML = '';
+        document.getElementById('pharm-success').classList.remove('hidden');
+      }
+
+      /* ── Order Detail Data ── */
+      var orderData = [
+        {
+          patient: 'Amara Okafor',
+          test: 'Complete Blood Count',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A65,000',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Today, 08:02', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'done', time: 'Today, 08:02', actor: 'System' },
+            { name: 'Paid', status: 'done', time: 'Today, 08:18', actor: 'Mrs. Obi (Accounts)' },
+            { name: 'Routed to Lab', status: 'done', time: 'Today, 08:19', actor: 'System' },
+            { name: 'Sample Collected', status: 'done', time: 'Today, 09:05', actor: 'Sunshine Diagnostics' },
+            { name: 'Result Uploaded', status: 'done', time: 'Today, 09:48', actor: 'Sunshine Diagnostics' },
+            { name: 'Doctor Review', status: 'current', time: null, actor: null },
+            { name: 'Action Plan Approved', status: 'pending', time: null, actor: null },
+            { name: 'Patient Notified', status: 'pending', time: null, actor: null },
+            { name: 'Completed', status: 'pending', time: null, actor: null }
+          ]
+        },
+        {
+          patient: 'Emeka Nwankwo',
+          test: 'Malaria RDT',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A63,000',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Today, 08:30', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'done', time: 'Today, 08:30', actor: 'System' },
+            { name: 'Paid', status: 'done', time: 'Today, 08:45', actor: 'Mrs. Obi (Accounts)' },
+            { name: 'Routed to Lab', status: 'done', time: 'Today, 08:46', actor: 'System' },
+            { name: 'Sample Collected', status: 'done', time: 'Today, 09:10', actor: 'Sunshine Diagnostics' },
+            { name: 'Result Uploaded', status: 'current', time: null, actor: null },
+            { name: 'Doctor Review', status: 'pending', time: null, actor: null },
+            { name: 'Action Plan Approved', status: 'pending', time: null, actor: null },
+            { name: 'Patient Notified', status: 'pending', time: null, actor: null },
+            { name: 'Completed', status: 'pending', time: null, actor: null }
+          ]
+        },
+        {
+          patient: 'Fatima Bello',
+          test: 'Liver Function',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A68,500',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Today, 08:10', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'current', time: null, actor: null },
+            { name: 'Paid', status: 'pending', time: null, actor: null },
+            { name: 'Routed to Lab', status: 'pending', time: null, actor: null },
+            { name: 'Sample Collected', status: 'pending', time: null, actor: null },
+            { name: 'Result Uploaded', status: 'pending', time: null, actor: null },
+            { name: 'Doctor Review', status: 'pending', time: null, actor: null },
+            { name: 'Action Plan Approved', status: 'pending', time: null, actor: null },
+            { name: 'Patient Notified', status: 'pending', time: null, actor: null },
+            { name: 'Completed', status: 'pending', time: null, actor: null }
+          ]
+        },
+        {
+          patient: 'Chidi Okonkwo',
+          test: 'Urinalysis',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A64,000',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Yesterday, 09:00', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'done', time: 'Yesterday, 09:00', actor: 'System' },
+            { name: 'Paid', status: 'done', time: 'Yesterday, 09:12', actor: 'Mrs. Obi (Accounts)' },
+            { name: 'Routed to Lab', status: 'done', time: 'Yesterday, 09:13', actor: 'System' },
+            { name: 'Sample Collected', status: 'done', time: 'Yesterday, 10:05', actor: 'Sunshine Diagnostics' },
+            { name: 'Result Uploaded', status: 'done', time: 'Yesterday, 11:30', actor: 'Sunshine Diagnostics' },
+            { name: 'Doctor Review', status: 'done', time: 'Yesterday, 12:15', actor: 'Dr. Adeyemi' },
+            { name: 'Action Plan Approved', status: 'done', time: 'Yesterday, 12:18', actor: 'Dr. Adeyemi' },
+            { name: 'Patient Notified', status: 'done', time: 'Yesterday, 12:19', actor: 'System' },
+            { name: 'Completed', status: 'done', time: 'Yesterday, 14:30', actor: 'System' }
+          ]
+        },
+        {
+          patient: 'Ngozi Eze',
+          test: 'Renal Function',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A67,500',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Yesterday, 10:30', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'done', time: 'Yesterday, 10:30', actor: 'System' },
+            { name: 'Paid', status: 'done', time: 'Yesterday, 10:48', actor: 'Mrs. Obi (Accounts)' },
+            { name: 'Routed to Lab', status: 'done', time: 'Yesterday, 10:49', actor: 'System' },
+            { name: 'Sample Collected', status: 'done', time: 'Yesterday, 11:20', actor: 'Sunshine Diagnostics' },
+            { name: 'Result Uploaded', status: 'done', time: 'Yesterday, 13:00', actor: 'Sunshine Diagnostics' },
+            { name: 'Doctor Review', status: 'done', time: 'Yesterday, 14:10', actor: 'Dr. Adeyemi' },
+            { name: 'Action Plan Approved', status: 'done', time: 'Yesterday, 14:12', actor: 'Dr. Adeyemi' },
+            { name: 'Patient Notified', status: 'done', time: 'Yesterday, 14:13', actor: 'System' },
+            { name: 'Completed', status: 'pending', time: null, actor: null }
+          ]
+        },
+        {
+          patient: 'Blessing Adamu',
+          test: 'Malaria RDT',
+          doctor: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          lab: 'sunshinelab.pisgah.eth',
+          amount: '\u20A63,000',
+          steps: [
+            { name: 'Order Created', status: 'done', time: 'Today, 07:45', actor: 'Dr. Adeyemi' },
+            { name: 'Awaiting Payment', status: 'done', time: 'Today, 07:45', actor: 'System' },
+            { name: 'Paid', status: 'done', time: 'Today, 08:00', actor: 'Mrs. Obi (Accounts)' },
+            { name: 'Routed to Lab', status: 'done', time: 'Today, 08:01', actor: 'System' },
+            { name: 'Sample Collected', status: 'done', time: 'Today, 08:30', actor: 'Sunshine Diagnostics' },
+            { name: 'Result Uploaded', status: 'done', time: 'Today, 09:15', actor: 'Sunshine Diagnostics' },
+            { name: 'Doctor Review', status: 'done', time: 'Today, 09:50', actor: 'Dr. Adeyemi' },
+            { name: 'Action Plan Approved', status: 'done', time: 'Today, 09:52', actor: 'Dr. Adeyemi' },
+            { name: 'Patient Notified', status: 'done', time: 'Today, 09:53', actor: 'System' },
+            { name: 'Completed', status: 'current', time: null, actor: null }
+          ]
+        }
+      ];
+
+      var currentOrderDetail = -1;
+
+      function showOrderDetail(index, rowEl) {
+        var container = document.getElementById('order-detail-container');
+
+        // Deselect all rows
+        document.querySelectorAll('#orders-table .clickable-row').forEach(function(r) {
+          r.classList.remove('selected-row');
+        });
+
+        // Toggle off if same row clicked
+        if (currentOrderDetail === index) {
+          container.innerHTML = '';
+          currentOrderDetail = -1;
+          return;
+        }
+
+        currentOrderDetail = index;
+        rowEl.classList.add('selected-row');
+        var order = orderData[index];
+
+        var stepsHtml = '';
+        for (var i = 0; i < order.steps.length; i++) {
+          var step = order.steps[i];
+          var cls = step.status;
+          var infoText = '';
+          if (step.time) {
+            infoText = step.time;
+            if (step.actor) infoText += ' &middot; ' + step.actor;
+          } else if (step.status === 'current') {
+            infoText = 'In progress';
+          }
+          stepsHtml += '<div class="detail-timeline-step ' + cls + '">' +
+            '<div class="step-name">' + step.name + '</div>' +
+            (infoText ? '<div class="step-info">' + infoText + '</div>' : '') +
+            '</div>';
+        }
+
+        container.innerHTML =
+          '<div class="order-detail-panel">' +
+            '<div class="order-detail-header">' +
+              '<div>' +
+                '<h3>' + order.patient + ' &mdash; ' + order.test + '</h3>' +
+                '<div class="order-detail-meta">' +
+                  '<div class="meta-item"><span class="meta-label">Doctor</span>' + order.doctor + '</div>' +
+                  '<div class="meta-item"><span class="meta-label">Facility</span><span class="ens">' + order.facility + '</span></div>' +
+                  '<div class="meta-item"><span class="meta-label">Lab</span><span class="ens">' + order.lab + '</span></div>' +
+                  '<div class="meta-item"><span class="meta-label">Amount</span>' + order.amount + '</div>' +
+                '</div>' +
+              '</div>' +
+              '<button class="order-detail-close" onclick="closeOrderDetail()">&times;</button>' +
+            '</div>' +
+            '<div class="detail-timeline">' + stepsHtml + '</div>' +
+          '</div>';
+      }
+
+      function closeOrderDetail() {
+        document.getElementById('order-detail-container').innerHTML = '';
+        document.querySelectorAll('#orders-table .clickable-row').forEach(function(r) {
+          r.classList.remove('selected-row');
+        });
+        currentOrderDetail = -1;
+      }
+
+      /* ── Patient List Data ── */
+      var patientData = [
+        {
+          name: 'Amara Okafor',
+          phone: '+234 801 234 5678',
+          dob: '15 Jun 1992',
+          registered: '3 Apr 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Complete Blood Count', status: 'Doctor Review', statusClass: 'tag-amber', date: 'Today' },
+            { test: 'Malaria RDT', status: 'Completed', statusClass: 'tag-muted', date: '28 Mar 2026' }
+          ]
+        },
+        {
+          name: 'Emeka Nwankwo',
+          phone: '+234 802 345 6789',
+          dob: '22 Jan 1988',
+          registered: '2 Apr 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Malaria RDT', status: 'In Lab', statusClass: '', date: 'Today' }
+          ]
+        },
+        {
+          name: 'Fatima Bello',
+          phone: '+234 803 456 7890',
+          dob: '8 Mar 1995',
+          registered: '1 Apr 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Liver Function', status: 'Awaiting Payment', statusClass: '', date: 'Today' }
+          ]
+        },
+        {
+          name: 'Chidi Okonkwo',
+          phone: '+234 804 567 8901',
+          dob: '30 Nov 1980',
+          registered: '28 Mar 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Urinalysis', status: 'Completed', statusClass: 'tag-muted', date: 'Yesterday' },
+            { test: 'Malaria RDT', status: 'Completed', statusClass: 'tag-muted', date: '20 Mar 2026' },
+            { test: 'CBC', status: 'Completed', statusClass: 'tag-muted', date: '15 Mar 2026' }
+          ]
+        },
+        {
+          name: 'Ngozi Eze',
+          phone: '+234 805 678 9012',
+          dob: '12 Sep 1990',
+          registered: '25 Mar 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Renal Function', status: 'Patient Notified', statusClass: '', date: 'Yesterday' }
+          ]
+        },
+        {
+          name: 'Blessing Adamu',
+          phone: '+234 806 789 0123',
+          dob: '5 Jul 1997',
+          registered: '20 Mar 2026',
+          registeredBy: 'Dr. Adeyemi',
+          facility: 'stlukes.pisgah.eth',
+          orders: [
+            { test: 'Malaria RDT', status: 'Ready for Pickup', statusClass: '', date: 'Today' },
+            { test: 'CBC', status: 'Completed', statusClass: 'tag-muted', date: '5 Mar 2026' }
+          ]
+        }
+      ];
+
+      var expandedPatient = -1;
+
+      function togglePatientExpand(rowEl, index) {
+        var existingExpand = document.querySelector('.patient-expand-row');
+
+        // Remove any existing expansion
+        if (existingExpand) {
+          existingExpand.remove();
+          document.querySelectorAll('#patients-table .clickable-row').forEach(function(r) {
+            r.classList.remove('selected-row');
+          });
+        }
+
+        // Toggle off
+        if (expandedPatient === index) {
+          expandedPatient = -1;
+          return;
+        }
+
+        expandedPatient = index;
+        rowEl.classList.add('selected-row');
+        var p = patientData[index];
+
+        var ordersHtml = '';
+        for (var i = 0; i < p.orders.length; i++) {
+          var o = p.orders[i];
+          ordersHtml += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;' + (i > 0 ? 'border-top:1px solid var(--line);' : '') + '">' +
+            '<span style="font-size:13px;">' + o.test + '</span>' +
+            '<div style="display:flex;align-items:center;gap:12px;">' +
+              '<span class="tag ' + o.statusClass + '">' + o.status + '</span>' +
+              '<span style="font-size:12px;color:var(--muted);">' + o.date + '</span>' +
+            '</div>' +
+          '</div>';
+        }
+
+        var expandRow = document.createElement('tr');
+        expandRow.className = 'patient-expand-row';
+        expandRow.innerHTML = '<td colspan="4" style="padding:0;border-bottom:1px solid var(--line);">' +
+          '<div class="patient-expand">' +
+            '<div class="patient-expand-grid">' +
+              '<div class="meta-item"><span class="meta-label">Full Name</span>' + p.name + '</div>' +
+              '<div class="meta-item"><span class="meta-label">Phone</span>' + p.phone + '</div>' +
+              '<div class="meta-item"><span class="meta-label">Date of Birth</span>' + p.dob + '</div>' +
+              '<div class="meta-item"><span class="meta-label">Registered</span>' + p.registered + '</div>' +
+              '<div class="meta-item"><span class="meta-label">Registered By</span>' + p.registeredBy + '</div>' +
+              '<div class="meta-item"><span class="meta-label">Facility</span><span class="ens">' + p.facility + '</span></div>' +
+            '</div>' +
+            '<div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Order History</div>' +
+            ordersHtml +
+          '</div>' +
+        '</td>';
+
+        rowEl.parentNode.insertBefore(expandRow, rowEl.nextSibling);
+      }
+
+      function filterPatients() {
+        var query = document.getElementById('patient-search').value.toLowerCase();
+        var rows = document.querySelectorAll('#patients-table tbody .clickable-row');
+
+        // Close any expanded row
+        var existingExpand = document.querySelector('.patient-expand-row');
+        if (existingExpand) {
+          existingExpand.remove();
+          expandedPatient = -1;
+        }
+
+        rows.forEach(function(row) {
+          var name = row.cells[0].textContent.toLowerCase();
+          var phone = row.cells[1].textContent.toLowerCase();
+          if (name.indexOf(query) !== -1 || phone.indexOf(query) !== -1) {
+            row.style.display = '';
+          } else {
+            row.style.display = 'none';
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

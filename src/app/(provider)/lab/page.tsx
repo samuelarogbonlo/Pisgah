@@ -3,18 +3,14 @@ import {
   diagnosticOrders,
   patients,
   facilities,
+  labResults,
 } from "@/lib/db/schema";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { LabActions } from "./lab-actions";
 
 const SUNSHINE_LAB_ID = "a1b2c3d4-0002-4000-8000-000000000002";
 
 export default async function LabPage() {
-  const labStatuses = [
-    "ROUTED_TO_LAB",
-    "SAMPLE_COLLECTED",
-  ] as const;
-
   const incomingOrders = await db
     .select({
       id: diagnosticOrders.id,
@@ -22,10 +18,13 @@ export default async function LabPage() {
       status: diagnosticOrders.status,
       patientName: patients.name,
       clinicEns: facilities.ensName,
+      resultId: labResults.id,
+      rawText: labResults.rawText,
     })
     .from(diagnosticOrders)
     .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
     .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
+    .leftJoin(labResults, eq(labResults.orderId, diagnosticOrders.id))
     .where(eq(diagnosticOrders.labId, SUNSHINE_LAB_ID))
     .orderBy(sql`${diagnosticOrders.createdAt} desc`);
 
@@ -44,6 +43,8 @@ export default async function LabPage() {
     status: o.status,
     patientName: o.patientName,
     clinicEns: o.clinicEns,
+    resultId: o.resultId,
+    rawText: o.rawText,
   }));
 
   return (

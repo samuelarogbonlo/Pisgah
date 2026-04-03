@@ -194,7 +194,7 @@ export async function uploadResult(orderId: string, rawText: string) {
       .limit(1);
 
     if (order) {
-      const draftText = await generateDraft({
+      const draft = await generateDraft({
         rawText,
         testType: order.testType,
         patientName: order.patientName,
@@ -203,7 +203,7 @@ export async function uploadResult(orderId: string, rawText: string) {
       await db.insert(aiDrafts).values({
         orderId,
         resultId: labResult.id,
-        draftText,
+        draftText: JSON.stringify(draft),
         agentVerified: false,
       });
     }
@@ -264,12 +264,14 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
 
   // Create prescription if drug info provided
   if (drugName && dosage) {
+    const redemptionCode = Math.random().toString().slice(2, 8);
     await db.insert(prescriptions).values({
       orderId,
       patientId: order.patientId,
       pharmacyId: ACTORS.greenLeaf,
       items: [{ drugName, dosage, quantity, instructions }],
       status: "sent_to_pharmacy",
+      redemptionCode,
     });
   }
 
@@ -332,4 +334,240 @@ export async function registerPatient(formData: FormData) {
 
   revalidatePath("/patients");
   return { success: true, patient };
+}
+
+export async function createOrderWithNewPatient(formData: FormData) {
+  const patientName = formData.get("patientName") as string;
+  const patientPhone = (formData.get("patientPhone") as string) || null;
+  const patientDob = (formData.get("patientDob") as string) || null;
+  const testType = formData.get("testType") as string;
+  const clinicalNotes = formData.get("clinicalNotes") as string;
+  const amount = formData.get("amount") as string;
+
+  if (!patientName?.trim() || !testType || !amount) {
+    return { success: false, error: "Missing required fields" };
+  }
+
+  try {
+    // Create patient first
+    const [patient] = await db
+      .insert(patients)
+      .values({
+        name: patientName.trim(),
+        phone: patientPhone,
+        dob: patientDob,
+        registeredBy: ACTORS.doctor,
+        facilityId: ACTORS.stLukes,
+      })
+      .returning();
+
+    // Create order with the new patient
+    const [order] = await db
+      .insert(diagnosticOrders)
+      .values({
+        patientId: patient.id,
+        facilityId: ACTORS.stLukes,
+        doctorId: ACTORS.doctor,
+        labId: ACTORS.sunshineLab,
+        status: "CREATED",
+        testType,
+        clinicalNotes: clinicalNotes || null,
+        totalAmount: amount,
+      })
+      .returning();
+
+    // Create billing record
+    await db.insert(billingRecords).values({
+      orderId: order.id,
+      amount,
+      status: "unpaid",
+    });
+
+    // Log workflow event
+    await logWorkflowEvent({
+      orderId: order.id,
+      eventType: "ORDER_CREATED",
+      actorId: ACTORS.doctor,
+      actorRole: "doctor",
+    });
+
+    // Transition to AWAITING_PAYMENT
+    await transitionOrder({
+      orderId: order.id,
+      nextStatus: "AWAITING_PAYMENT",
+      actorId: ACTORS.doctor,
+      actorRole: "system",
+    });
+
+    revalidatePath("/doctor");
+    revalidatePath("/patients");
+
+    return { success: true, orderId: order.id };
+  } catch (err) {
+    console.error("[createOrderWithNewPatient] Failed:", err);
+    return { success: false, error: "Failed to create order" };
+  }
+}
+
+export async function simulateOnlinePayment(orderId: string) {
+  // Find the billing record for this order
+  const [billing] = await db
+    .select()
+    .from(billingRecords)
+    .where(eq(billingRecords.orderId, orderId))
+    .limit(1);
+
+  if (!billing) {
+    return { success: false, error: "Billing record not found" };
+  }
+
+  // Update billing status to online_confirmed
+  await db
+    .update(billingRecords)
+    .set({
+      status: "online_confirmed",
+      confirmedAt: new Date(),
+    })
+    .where(eq(billingRecords.id, billing.id));
+
+  // Transition: AWAITING_PAYMENT -> PAID
+  const paidResult = await transitionOrder({
+    orderId,
+    nextStatus: "PAID",
+    actorId: ACTORS.accounts,
+    actorRole: "accounts",
+  });
+
+  if (!paidResult.success) {
+    return { success: false, error: paidResult.error };
+  }
+
+  // Auto-transition: PAID -> ROUTED_TO_LAB
+  await transitionOrder({
+    orderId,
+    nextStatus: "ROUTED_TO_LAB",
+    actorId: ACTORS.accounts,
+    actorRole: "system",
+  });
+
+  revalidatePath("/mini");
+  revalidatePath("/accounts");
+  revalidatePath("/dashboard");
+
+  return { success: true };
+}
+
+export async function updateResult(resultId: string, rawText: string) {
+  if (!rawText.trim()) {
+    return { success: false, error: "Result text is required" };
+  }
+
+  // Update the lab result raw text
+  const [updatedResult] = await db
+    .update(labResults)
+    .set({ rawText })
+    .where(eq(labResults.id, resultId))
+    .returning();
+
+  if (!updatedResult) {
+    return { success: false, error: "Lab result not found" };
+  }
+
+  // Fetch order info for AI draft regeneration
+  const [order] = await db
+    .select({
+      id: diagnosticOrders.id,
+      testType: diagnosticOrders.testType,
+      patientName: patients.name,
+    })
+    .from(diagnosticOrders)
+    .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+    .where(eq(diagnosticOrders.id, updatedResult.orderId))
+    .limit(1);
+
+  if (order) {
+    try {
+      const draft = await generateDraft({
+        rawText,
+        testType: order.testType,
+        patientName: order.patientName,
+      });
+
+      // Delete old draft for this order, insert new one
+      await db
+        .delete(aiDrafts)
+        .where(eq(aiDrafts.orderId, order.id));
+
+      await db.insert(aiDrafts).values({
+        orderId: order.id,
+        resultId: updatedResult.id,
+        draftText: JSON.stringify(draft),
+        agentVerified: false,
+      });
+    } catch (err) {
+      console.error("[updateResult] Failed to regenerate AI draft:", err);
+    }
+  }
+
+  revalidatePath("/lab");
+  revalidatePath("/review");
+
+  return { success: true };
+}
+
+export async function redeemPrescription(code: string) {
+  // Find prescription by redemption code
+  const [prescription] = await db
+    .select()
+    .from(prescriptions)
+    .where(eq(prescriptions.redemptionCode, code))
+    .limit(1);
+
+  if (!prescription) {
+    return { success: false, error: "Invalid code" };
+  }
+
+  if (prescription.status === "fulfilled" || prescription.status === "redeemed") {
+    return { success: false, error: "Already redeemed" };
+  }
+
+  // Update prescription status
+  await db
+    .update(prescriptions)
+    .set({ status: "fulfilled", redeemedAt: new Date() })
+    .where(eq(prescriptions.id, prescription.id));
+
+  // Transition the associated order: PATIENT_NOTIFIED -> COMPLETED
+  await transitionOrder({
+    orderId: prescription.orderId,
+    nextStatus: "COMPLETED",
+    actorId: ACTORS.pharmacist,
+    actorRole: "system",
+  });
+
+  revalidatePath("/pharmacy");
+  revalidatePath("/dashboard");
+  revalidatePath("/mini");
+
+  return { success: true };
+}
+
+export async function confirmReceipt(orderId: string) {
+  const PATIENT_ACTOR_ID = "00000000-0000-4000-8000-000000000000";
+
+  const result = await transitionOrder({
+    orderId,
+    nextStatus: "COMPLETED",
+    actorId: PATIENT_ACTOR_ID,
+    actorRole: "system",
+  });
+
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+
+  revalidatePath("/mini");
+  revalidatePath("/dashboard");
+
+  return { success: true };
 }
