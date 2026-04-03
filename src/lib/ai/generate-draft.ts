@@ -34,3 +34,26 @@ export async function generateDraft(params: {
     };
   }
 }
+
+export function serializeDraft(draft: DraftResult): string {
+  return JSON.stringify(draft);
+}
+
+export function parseDraftText(raw: string | null | undefined): DraftResult | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<DraftResult>;
+    return {
+      summary: parsed.summary ?? "",
+      recommendations: parsed.recommendations ?? "",
+      suggestedMedication: parsed.suggestedMedication ?? null,
+    };
+  } catch {
+    return {
+      summary: raw,
+      recommendations: "",
+      suggestedMedication: null,
+    };
+  }
+}

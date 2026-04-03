@@ -6,7 +6,7 @@ import {
   patients,
   prescriptions,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { OrderTable } from "./order-table";
 
 type OrderStatus = typeof diagnosticOrders.$inferSelect["status"];
@@ -19,6 +19,8 @@ type DashboardRow = {
   doctorName: string;
   statusLabel: string;
   dateLabel: string;
+  orderStatus: OrderStatus;
+  updatedAt: Date | null;
 };
 
 function toCurrency(amount: number) {
@@ -58,12 +60,30 @@ function formatDateLabel(date: Date | null): string {
   });
 }
 
+function isSameDay(date: Date | null, target: Date) {
+  if (!date) return false;
+
+  return (
+    date.getFullYear() === target.getFullYear() &&
+    date.getMonth() === target.getMonth() &&
+    date.getDate() === target.getDate()
+  );
+}
+
 function displayStatusLabel(
   orderStatus: OrderStatus,
   prescriptionStatus: PrescriptionStatus | null
 ) {
   if (prescriptionStatus === "ready_for_pickup") {
     return "Ready for Pickup";
+  }
+
+  if (prescriptionStatus === "redeemed") {
+    return "Dispensed";
+  }
+
+  if (prescriptionStatus === "sent_to_pharmacy") {
+    return "Sent to Pharmacy";
   }
 
   if (
@@ -91,7 +111,7 @@ function displayStatusLabel(
 }
 
 export default async function DashboardPage() {
-  const [orders, billingSummary] = await Promise.all([
+  const [orders, billingRows] = await Promise.all([
     db
       .select({
         id: diagnosticOrders.id,
@@ -100,6 +120,7 @@ export default async function DashboardPage() {
         doctorName: facilityUsers.name,
         orderStatus: diagnosticOrders.status,
         createdAt: diagnosticOrders.createdAt,
+        updatedAt: diagnosticOrders.updatedAt,
         prescriptionStatus: prescriptions.status,
       })
       .from(diagnosticOrders)
@@ -108,7 +129,8 @@ export default async function DashboardPage() {
       .leftJoin(prescriptions, eq(prescriptions.orderId, diagnosticOrders.id)),
     db
       .select({
-        total: sql<number>`cast(coalesce(sum(${billingRecords.amount}), 0) as int)`,
+        amount: billingRecords.amount,
+        createdAt: billingRecords.createdAt,
       })
       .from(billingRecords),
   ]);
@@ -123,7 +145,11 @@ export default async function DashboardPage() {
       order.prescriptionStatus ?? null
     ),
     dateLabel: formatDateLabel(order.createdAt),
+    orderStatus: order.orderStatus,
+    updatedAt: order.updatedAt,
   }));
+
+  const today = new Date();
 
   const activeCount = rows.filter((row) =>
     ["Doctor Review", "In Lab", "Awaiting Payment"].includes(row.statusLabel)
@@ -134,10 +160,13 @@ export default async function DashboardPage() {
   ).length;
 
   const completedTodayCount = rows.filter(
-    (row) => row.statusLabel !== "Awaiting Payment"
+    (row) => row.orderStatus === "COMPLETED" && isSameDay(row.updatedAt, today)
   ).length;
 
-  const billedToday = billingSummary[0]?.total ?? 0;
+  const billedToday = billingRows.reduce((sum, billing) => {
+    if (!isSameDay(billing.createdAt, today)) return sum;
+    return sum + Number(billing.amount ?? 0);
+  }, 0);
 
   return (
     <div>

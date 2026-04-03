@@ -2,39 +2,22 @@
 
 import { useTransition, useState } from "react";
 import { approveActionPlan } from "@/app/actions";
-
-interface AiDraftShape {
-  summary?: string;
-  recommendations?: string;
-  suggestedMedication?: {
-    drugName?: string;
-    dosage?: string;
-    quantity?: string;
-    instructions?: string;
-  } | null;
-}
+import { parseDraftText } from "@/lib/ai/generate-draft";
 
 interface ReviewFormProps {
   orderId: string;
   aiDraft: string;
 }
 
-function parseAiDraft(raw: string): AiDraftShape {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed as AiDraftShape;
-  } catch {
-    // Backward compat: treat raw text as summary only
-    return { summary: raw };
-  }
-}
-
 export function ReviewForm({ orderId, aiDraft }: ReviewFormProps) {
   const [isPending, startTransition] = useTransition();
   const [approved, setApproved] = useState(false);
 
-  const draft = parseAiDraft(aiDraft);
+  const draft = parseDraftText(aiDraft) ?? {
+    summary: "",
+    recommendations: "",
+    suggestedMedication: null,
+  };
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {

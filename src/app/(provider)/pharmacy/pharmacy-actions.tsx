@@ -67,7 +67,7 @@ function RedeemButton({
         onClick={() => {
           setError(null);
           startTransition(async () => {
-            const result = await redeemPrescription(code);
+            const result = await redeemPrescription(prescriptionId, code);
             if (result.error) {
               setError(result.error);
             } else {

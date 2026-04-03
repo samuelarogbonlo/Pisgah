@@ -5,7 +5,8 @@ import {
   labResults,
   aiDrafts,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { parseDraftText } from "@/lib/ai/generate-draft";
+import { eq, inArray, sql } from "drizzle-orm";
 import { ReviewForm } from "./review-form";
 
 export default async function ReviewPage() {
@@ -33,12 +34,11 @@ export default async function ReviewPage() {
         orderId: aiDrafts.orderId,
         draftText: aiDrafts.draftText,
       })
-      .from(aiDrafts);
+      .from(aiDrafts)
+      .where(inArray(aiDrafts.orderId, orderIds));
 
     for (const draft of drafts) {
-      if (orderIds.includes(draft.orderId)) {
-        draftsMap[draft.orderId] = draft.draftText;
-      }
+      draftsMap[draft.orderId] = draft.draftText;
     }
   }
 
@@ -70,52 +70,74 @@ export default async function ReviewPage() {
         </div>
       )}
 
-      {serialized.map((order) => (
-        <div key={order.id} className="mb-4">
-          <p className="text-sm text-gray-500 mb-3">
-            {order.patientName} / {order.testType}
-          </p>
-          <div className="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
-            {/* Left: Raw Result + AI Draft */}
-            <div className="p-3.5 rounded-md border border-gray-200 bg-gray-50/80">
-              <h4 className="text-xs tracking-[0.16em] uppercase text-gray-500 mb-3">
-                Raw Result
-              </h4>
-              <p className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap text-gray-800">
-                {order.rawText}
-              </p>
+      {serialized.map((order) => {
+        const parsedDraft = parseDraftText(order.aiDraft);
 
-              {order.aiDraft && (
-                <div className="border-t border-gray-200 pt-4 mt-4">
-                  <h4 className="text-xs tracking-[0.16em] uppercase text-gray-500 mb-3">
-                    AI Draft
-                  </h4>
-                  <p className="text-sm leading-relaxed text-gray-800">
-                    {order.aiDraft}
-                  </p>
-                  <div className="mt-3.5 p-2.5 rounded-md border border-gray-400 bg-white">
-                    <strong className="block text-[11px] uppercase tracking-[0.14em] text-gray-500 mb-1">
-                      Drafted by
-                    </strong>
-                    <span className="font-mono text-xs text-gray-400">
-                      assistant.stlukes.pisgah.eth
-                    </span>
-                    <span className="block mt-1 text-xs text-gray-500">
-                      Human-backed clinic assistant
-                    </span>
+        return (
+          <div key={order.id} className="mb-4">
+            <p className="text-sm text-gray-500 mb-3">
+              {order.patientName} / {order.testType}
+            </p>
+            <div className="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
+              <div className="p-3.5 rounded-md border border-gray-200 bg-gray-50/80">
+                <h4 className="text-xs tracking-[0.16em] uppercase text-gray-500 mb-3">
+                  Raw Result
+                </h4>
+                <p className="font-mono text-[13px] leading-relaxed whitespace-pre-wrap text-gray-800">
+                  {order.rawText}
+                </p>
+
+                {order.aiDraft && (
+                  <div className="border-t border-gray-200 pt-4 mt-4">
+                    <h4 className="text-xs tracking-[0.16em] uppercase text-gray-500 mb-3">
+                      AI Draft
+                    </h4>
+                    {parsedDraft ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500 mb-1">
+                            Summary
+                          </p>
+                          <p className="text-sm leading-relaxed text-gray-800">
+                            {parsedDraft.summary}
+                          </p>
+                        </div>
+                        {parsedDraft.recommendations && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500 mb-1">
+                              Recommendations
+                            </p>
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-800">
+                              {parsedDraft.recommendations}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm leading-relaxed text-gray-500">
+                        No AI draft available yet.
+                      </p>
+                    )}
+                    <div className="mt-3.5 p-2.5 rounded-md border border-gray-400 bg-white">
+                      <strong className="block text-[11px] uppercase tracking-[0.14em] text-gray-500 mb-1">
+                        Drafted by
+                      </strong>
+                      <span className="font-mono text-xs text-gray-400">
+                        assistant.stlukes.pisgah.eth
+                      </span>
+                      <span className="block mt-1 text-xs text-gray-500">
+                        Human-backed clinic assistant
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            {/* Right: Action Plan Form */}
-            <ReviewForm
-              orderId={order.id}
-              aiDraft={order.aiDraft ?? ""}
-            />
+              <ReviewForm orderId={order.id} aiDraft={order.aiDraft ?? ""} />
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

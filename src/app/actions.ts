@@ -1,6 +1,7 @@
 "use server";
 
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { randomInt } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -12,7 +13,8 @@ import {
   patients,
   aiDrafts,
 } from "@/lib/db/schema";
-import { generateDraft } from "@/lib/ai/generate-draft";
+import { generateDraft, serializeDraft } from "@/lib/ai/generate-draft";
+import { canTransition, type OrderStatus } from "@/lib/workflow/machine";
 import { transitionOrder } from "@/lib/workflow/transition";
 import { logWorkflowEvent } from "@/lib/workflow/events";
 
@@ -26,6 +28,23 @@ const ACTORS = {
   sunshineLab: "a1b2c3d4-0002-4000-8000-000000000002",
   greenLeaf: "a1b2c3d4-0003-4000-8000-000000000003",
 } as const;
+
+function generateRedemptionCode() {
+  return randomInt(100000, 1000000).toString();
+}
+
+async function getOrderStatus(orderId: string) {
+  const [order] = await db
+    .select({
+      status: diagnosticOrders.status,
+      patientId: diagnosticOrders.patientId,
+    })
+    .from(diagnosticOrders)
+    .where(eq(diagnosticOrders.id, orderId))
+    .limit(1);
+
+  return order;
+}
 
 export async function createOrder(formData: FormData) {
   const patientId = formData.get("patientId") as string;
@@ -83,7 +102,6 @@ export async function createOrder(formData: FormData) {
 }
 
 export async function confirmPayment(billingId: string) {
-  // Fetch billing record to get orderId
   const [billing] = await db
     .select()
     .from(billingRecords)
@@ -94,7 +112,22 @@ export async function confirmPayment(billingId: string) {
     return { error: "Billing record not found" };
   }
 
-  // Update billing status
+  if (billing.status !== "unpaid") {
+    return { error: "Payment has already been confirmed" };
+  }
+
+  const order = await getOrderStatus(billing.orderId);
+  if (!order) {
+    return { error: "Order not found" };
+  }
+
+  if (
+    !canTransition(order.status as OrderStatus, "PAID", "accounts") ||
+    !canTransition("PAID", "ROUTED_TO_LAB", "system")
+  ) {
+    return { error: "Order is not ready for payment confirmation" };
+  }
+
   await db
     .update(billingRecords)
     .set({
@@ -154,14 +187,37 @@ export async function uploadResult(orderId: string, rawText: string) {
     return { error: "Result text is required" };
   }
 
-  // Insert lab result
-  const [labResult] = await db.insert(labResults).values({
-    orderId,
-    labUserId: ACTORS.labTech,
-    rawText,
-  }).returning();
+  const order = await getOrderStatus(orderId);
+  if (!order) {
+    return { error: "Order not found" };
+  }
 
-  // Transition: SAMPLE_COLLECTED -> RESULT_UPLOADED
+  if (
+    !canTransition(order.status as OrderStatus, "RESULT_UPLOADED", "lab_tech") ||
+    !canTransition("RESULT_UPLOADED", "DOCTOR_REVIEW", "system")
+  ) {
+    return { error: "Order is not ready for result upload" };
+  }
+
+  const [existingResult] = await db
+    .select({ id: labResults.id })
+    .from(labResults)
+    .where(eq(labResults.orderId, orderId))
+    .limit(1);
+
+  if (existingResult) {
+    return { error: "A result already exists for this order" };
+  }
+
+  const [labResult] = await db
+    .insert(labResults)
+    .values({
+      orderId,
+      labUserId: ACTORS.labTech,
+      rawText,
+    })
+    .returning();
+
   const uploadTransition = await transitionOrder({
     orderId,
     nextStatus: "RESULT_UPLOADED",
@@ -170,18 +226,21 @@ export async function uploadResult(orderId: string, rawText: string) {
   });
 
   if (!uploadTransition.success) {
+    await db.delete(labResults).where(eq(labResults.id, labResult.id));
     return { error: uploadTransition.error };
   }
 
-  // Auto-transition: RESULT_UPLOADED -> DOCTOR_REVIEW (system)
-  await transitionOrder({
+  const reviewTransition = await transitionOrder({
     orderId,
     nextStatus: "DOCTOR_REVIEW",
     actorId: ACTORS.labTech,
     actorRole: "system",
   });
 
-  // Generate AI draft (non-blocking — failure does not stop the workflow)
+  if (!reviewTransition.success) {
+    return { error: reviewTransition.error };
+  }
+
   try {
     const [order] = await db
       .select({
@@ -203,7 +262,7 @@ export async function uploadResult(orderId: string, rawText: string) {
       await db.insert(aiDrafts).values({
         orderId,
         resultId: labResult.id,
-        draftText: JSON.stringify(draft),
+        draftText: serializeDraft(draft),
         agentVerified: false,
       });
     }
@@ -230,7 +289,14 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
     return { error: "Summary and recommendations are required" };
   }
 
-  // Fetch lab result for this order
+  const wantsPrescription = [drugName, dosage, quantity, instructions].some(
+    (value) => Boolean(value?.trim()),
+  );
+
+  if (wantsPrescription && (!drugName?.trim() || !dosage?.trim())) {
+    return { error: "Drug name and dosage are required to create a prescription" };
+  }
+
   const [labResult] = await db
     .select()
     .from(labResults)
@@ -241,41 +307,52 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
     return { error: "Lab result not found for this order" };
   }
 
-  // Fetch order for patientId
-  const [order] = await db
-    .select()
-    .from(diagnosticOrders)
-    .where(eq(diagnosticOrders.id, orderId))
-    .limit(1);
+  const order = await getOrderStatus(orderId);
 
   if (!order) {
     return { error: "Order not found" };
   }
 
-  // Create action plan
-  await db.insert(actionPlans).values({
+  if (
+    !canTransition(order.status as OrderStatus, "ACTION_PLAN_APPROVED", "doctor") ||
+    !canTransition("ACTION_PLAN_APPROVED", "PATIENT_NOTIFIED", "system")
+  ) {
+    return { error: "Order is not ready for doctor approval" };
+  }
+
+  const [existingPlan] = await db
+    .select({ id: actionPlans.id })
+    .from(actionPlans)
+    .where(eq(actionPlans.orderId, orderId))
+    .limit(1);
+
+  if (existingPlan) {
+    return { error: "Action plan has already been approved for this order" };
+  }
+
+  const [createdPlan] = await db.insert(actionPlans).values({
     orderId,
     resultId: labResult.id,
     summary,
     recommendations,
     approvedBy: ACTORS.doctor,
     approvedAt: new Date(),
-  });
+  }).returning();
 
-  // Create prescription if drug info provided
-  if (drugName && dosage) {
-    const redemptionCode = Math.random().toString().slice(2, 8);
-    await db.insert(prescriptions).values({
+  let createdPrescriptionId: string | null = null;
+
+  if (wantsPrescription) {
+    const [prescription] = await db.insert(prescriptions).values({
       orderId,
       patientId: order.patientId,
       pharmacyId: ACTORS.greenLeaf,
       items: [{ drugName, dosage, quantity, instructions }],
-      status: "sent_to_pharmacy",
-      redemptionCode,
-    });
+      status: "ready_for_pickup",
+      redemptionCode: generateRedemptionCode(),
+    }).returning({ id: prescriptions.id });
+    createdPrescriptionId = prescription.id;
   }
 
-  // Transition: DOCTOR_REVIEW -> ACTION_PLAN_APPROVED
   const approveResult = await transitionOrder({
     orderId,
     nextStatus: "ACTION_PLAN_APPROVED",
@@ -284,32 +361,28 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
   });
 
   if (!approveResult.success) {
+    await db.delete(actionPlans).where(eq(actionPlans.id, createdPlan.id));
+    if (createdPrescriptionId) {
+      await db.delete(prescriptions).where(eq(prescriptions.id, createdPrescriptionId));
+    }
     return { error: approveResult.error };
   }
 
-  // Auto-transition: ACTION_PLAN_APPROVED -> PATIENT_NOTIFIED (system)
-  await transitionOrder({
+  const notifyResult = await transitionOrder({
     orderId,
     nextStatus: "PATIENT_NOTIFIED",
     actorId: ACTORS.doctor,
     actorRole: "system",
   });
 
+  if (!notifyResult.success) {
+    return { error: notifyResult.error };
+  }
+
   revalidatePath("/dashboard");
   revalidatePath("/review");
   revalidatePath("/pharmacy");
   revalidatePath("/mini");
-
-  return { success: true };
-}
-
-export async function dispensePrescription(prescriptionId: string) {
-  await db
-    .update(prescriptions)
-    .set({ status: "fulfilled" })
-    .where(eq(prescriptions.id, prescriptionId));
-
-  revalidatePath("/pharmacy");
 
   return { success: true };
 }
@@ -410,7 +483,6 @@ export async function createOrderWithNewPatient(formData: FormData) {
 }
 
 export async function simulateOnlinePayment(orderId: string) {
-  // Find the billing record for this order
   const [billing] = await db
     .select()
     .from(billingRecords)
@@ -421,7 +493,22 @@ export async function simulateOnlinePayment(orderId: string) {
     return { success: false, error: "Billing record not found" };
   }
 
-  // Update billing status to online_confirmed
+  if (billing.status !== "unpaid") {
+    return { success: false, error: "Payment has already been confirmed" };
+  }
+
+  const order = await getOrderStatus(orderId);
+  if (!order) {
+    return { success: false, error: "Order not found" };
+  }
+
+  if (
+    !canTransition(order.status as OrderStatus, "PAID", "accounts") ||
+    !canTransition("PAID", "ROUTED_TO_LAB", "system")
+  ) {
+    return { success: false, error: "Order is not ready for payment" };
+  }
+
   await db
     .update(billingRecords)
     .set({
@@ -430,7 +517,6 @@ export async function simulateOnlinePayment(orderId: string) {
     })
     .where(eq(billingRecords.id, billing.id));
 
-  // Transition: AWAITING_PAYMENT -> PAID
   const paidResult = await transitionOrder({
     orderId,
     nextStatus: "PAID",
@@ -442,13 +528,16 @@ export async function simulateOnlinePayment(orderId: string) {
     return { success: false, error: paidResult.error };
   }
 
-  // Auto-transition: PAID -> ROUTED_TO_LAB
-  await transitionOrder({
+  const routedResult = await transitionOrder({
     orderId,
     nextStatus: "ROUTED_TO_LAB",
     actorId: ACTORS.accounts,
     actorRole: "system",
   });
+
+  if (!routedResult.success) {
+    return { success: false, error: routedResult.error };
+  }
 
   revalidatePath("/mini");
   revalidatePath("/accounts");
@@ -501,7 +590,7 @@ export async function updateResult(resultId: string, rawText: string) {
       await db.insert(aiDrafts).values({
         orderId: order.id,
         resultId: updatedResult.id,
-        draftText: JSON.stringify(draft),
+        draftText: serializeDraft(draft),
         agentVerified: false,
       });
     } catch (err) {
@@ -515,35 +604,33 @@ export async function updateResult(resultId: string, rawText: string) {
   return { success: true };
 }
 
-export async function redeemPrescription(code: string) {
-  // Find prescription by redemption code
+export async function redeemPrescription(prescriptionId: string, code: string) {
   const [prescription] = await db
     .select()
     .from(prescriptions)
-    .where(eq(prescriptions.redemptionCode, code))
+    .where(eq(prescriptions.id, prescriptionId))
     .limit(1);
 
   if (!prescription) {
+    return { success: false, error: "Prescription not found" };
+  }
+
+  if (prescription.redemptionCode !== code.trim()) {
     return { success: false, error: "Invalid code" };
   }
 
-  if (prescription.status === "fulfilled" || prescription.status === "redeemed") {
+  if (prescription.status === "redeemed") {
     return { success: false, error: "Already redeemed" };
   }
 
-  // Update prescription status
+  if (prescription.status !== "ready_for_pickup") {
+    return { success: false, error: "Prescription is not ready for pickup" };
+  }
+
   await db
     .update(prescriptions)
-    .set({ status: "fulfilled", redeemedAt: new Date() })
+    .set({ status: "redeemed", redeemedAt: new Date() })
     .where(eq(prescriptions.id, prescription.id));
-
-  // Transition the associated order: PATIENT_NOTIFIED -> COMPLETED
-  await transitionOrder({
-    orderId: prescription.orderId,
-    nextStatus: "COMPLETED",
-    actorId: ACTORS.pharmacist,
-    actorRole: "system",
-  });
 
   revalidatePath("/pharmacy");
   revalidatePath("/dashboard");
@@ -554,6 +641,18 @@ export async function redeemPrescription(code: string) {
 
 export async function confirmReceipt(orderId: string) {
   const PATIENT_ACTOR_ID = "00000000-0000-4000-8000-000000000000";
+
+  const [prescription] = await db
+    .select({
+      status: prescriptions.status,
+    })
+    .from(prescriptions)
+    .where(eq(prescriptions.orderId, orderId))
+    .limit(1);
+
+  if (prescription && prescription.status !== "redeemed") {
+    return { success: false, error: "Prescription must be redeemed first" };
+  }
 
   const result = await transitionOrder({
     orderId,

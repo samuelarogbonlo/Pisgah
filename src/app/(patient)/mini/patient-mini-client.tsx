@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { simulateOnlinePayment, confirmReceipt } from "@/app/actions";
 
 interface TimelineStep {
@@ -51,12 +52,20 @@ function PayNowCard({
 }) {
   const [isPending, startTransition] = useTransition();
   const [paid, setPaid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   function handlePay() {
     startTransition(async () => {
-      await simulateOnlinePayment(orderId);
+      setError(null);
+      const result = await simulateOnlinePayment(orderId);
+      if (!result.success) {
+        setError(result.error ?? "Payment could not be processed");
+        return;
+      }
+
       setPaid(true);
-      window.location.reload();
+      router.refresh();
     });
   }
 
@@ -92,6 +101,11 @@ function PayNowCard({
       <p className="mt-2 text-[10px] text-gray-400">
         Or pay cash at the accounts desk
       </p>
+      {error && (
+        <p className="mt-2 text-[11px] text-red-600">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -117,10 +131,16 @@ function RedemptionCodeCard({ code }: { code: string }) {
 function ConfirmReceiptButton({ orderId }: { orderId: string }) {
   const [isPending, startTransition] = useTransition();
   const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function handleConfirm() {
     startTransition(async () => {
-      await confirmReceipt(orderId);
+      setError(null);
+      const result = await confirmReceipt(orderId);
+      if (!result.success) {
+        setError(result.error ?? "Could not confirm receipt");
+        return;
+      }
       setConfirmed(true);
     });
   }
@@ -136,13 +156,20 @@ function ConfirmReceiptButton({ orderId }: { orderId: string }) {
   }
 
   return (
-    <button
-      onClick={handleConfirm}
-      disabled={isPending}
-      className="inline-flex mt-3 px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase disabled:opacity-50"
-    >
-      {isPending ? "Confirming..." : "Confirm Drugs Received"}
-    </button>
+    <div className="mt-3">
+      <button
+        onClick={handleConfirm}
+        disabled={isPending}
+        className="inline-flex px-3.5 py-2.5 rounded-full border border-black bg-black text-white text-[11px] tracking-[0.14em] uppercase disabled:opacity-50"
+      >
+        {isPending ? "Confirming..." : "Confirm Drugs Received"}
+      </button>
+      {error && (
+        <p className="mt-2 text-[11px] text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -183,9 +210,7 @@ export function PatientMiniClient({
 
   const isCompleted = order.displayStatus === "Completed";
 
-  const prescriptionFulfilled =
-    prescription?.status === "fulfilled" ||
-    prescription?.status === "redeemed";
+  const prescriptionRedeemed = prescription?.status === "redeemed";
 
   return (
     <>
@@ -351,7 +376,7 @@ export function PatientMiniClient({
               )}
 
               {/* Confirm receipt when prescription is fulfilled/redeemed */}
-              {prescriptionFulfilled && !isCompleted && (
+              {prescriptionRedeemed && !isCompleted && (
                 <ConfirmReceiptButton orderId={orderId} />
               )}
             </div>
