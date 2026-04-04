@@ -132,9 +132,12 @@ export default async function DashboardPage() {
         .from(diagnosticOrders)
         .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
         .innerJoin(facilityUsers, eq(diagnosticOrders.doctorId, facilityUsers.id))
+        .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
         .leftJoin(prescriptions, eq(prescriptions.orderId, diagnosticOrders.id));
 
-      if (isAdmin) return query;
+      if (isAdmin) {
+        return query.where(eq(facilities.hospitalId, session.hospitalId));
+      }
       if (session.role === "lab_tech") {
         return query.where(eq(diagnosticOrders.labId, session.facilityId));
       }
@@ -156,9 +159,12 @@ export default async function DashboardPage() {
         .innerJoin(
           diagnosticOrders,
           eq(billingRecords.orderId, diagnosticOrders.id),
-        );
+        )
+        .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id));
 
-      if (isAdmin) return query;
+      if (isAdmin) {
+        return query.where(eq(facilities.hospitalId, session.hospitalId));
+      }
       return query.where(eq(diagnosticOrders.facilityId, session.facilityId));
     })(),
   ]);
@@ -204,7 +210,7 @@ export default async function DashboardPage() {
           Operational Dashboard
         </div>
         <h2 className="mt-3 text-[4.1rem] leading-[0.96] tracking-[-0.06em] max-md:text-[3rem]">
-          Today at {session.facilityName}
+          Today at {isAdmin ? session.hospitalName : session.facilityName}
         </h2>
       </div>
 

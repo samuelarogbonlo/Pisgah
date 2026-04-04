@@ -3,6 +3,7 @@
 import { randomInt } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { isAddress } from "viem";
 import { db } from "@/lib/db";
 import {
   diagnosticOrders,
@@ -23,12 +24,23 @@ import {
   requirePatientSession,
   requireProviderSession,
 } from "@/lib/auth/session";
+import {
+  buildStaffInviteLink,
+  generateStaffInviteToken,
+} from "@/lib/auth/invites";
 import { issuePatientClaim } from "@/lib/patients/claims";
 import { attestLabResult } from "@/lib/attestations/eas";
 import {
   buildAgentkitHeader,
   getAgentDraftEndpoint,
 } from "@/lib/agent/signer";
+import {
+  findFacilityInHospital,
+  findFacilityUserInHospital,
+  findHospitalFacilityByType,
+} from "@/lib/hospitals/scope";
+import { clearEnsProfileCache, resolveEnsProfile } from "@/lib/ens/resolver";
+import { syncProvisionedFacilityENS } from "@/lib/ens/provision";
 
 function generateRedemptionCode() {
   return randomInt(100000, 1000000).toString();
@@ -42,26 +54,29 @@ async function getOrderStatus(orderId: string) {
       facilityId: diagnosticOrders.facilityId,
       labId: diagnosticOrders.labId,
       testType: diagnosticOrders.testType,
+      hospitalId: facilities.hospitalId,
     })
     .from(diagnosticOrders)
+    .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .where(eq(diagnosticOrders.id, orderId))
     .limit(1);
 
   return order;
 }
 
-async function getFacilityByType(type: "lab" | "pharmacy") {
-  const [facility] = await db
-    .select({
-      id: facilities.id,
-      name: facilities.name,
-      ensName: facilities.ensName,
-    })
-    .from(facilities)
-    .where(eq(facilities.type, type))
-    .limit(1);
+async function getFacilityByType(
+  hospitalId: string,
+  type: "lab" | "pharmacy",
+) {
+  return findHospitalFacilityByType(hospitalId, type);
+}
 
-  return facility ?? null;
+function getFacilityMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") {
+    return {};
+  }
+
+  return metadata as Record<string, unknown>;
 }
 
 async function requestVerifiedDraft(params: {
@@ -108,9 +123,19 @@ export async function createOrder(formData: FormData) {
     return { error: "Missing required fields" };
   }
 
-  const lab = await getFacilityByType("lab");
+  const [patient] = await db
+    .select({ id: patients.id, facilityId: patients.facilityId })
+    .from(patients)
+    .where(eq(patients.id, patientId))
+    .limit(1);
+
+  if (!patient || patient.facilityId !== actor.facilityId) {
+    return { error: "Patient could not be found in the current clinic" };
+  }
+
+  const lab = await getFacilityByType(actor.hospitalId, "lab");
   if (!lab) {
-    return { error: "No lab facility has been configured yet" };
+    return { error: "No lab facility has been configured for this hospital yet" };
   }
 
   // Insert order as CREATED
@@ -185,6 +210,14 @@ export async function confirmPayment(billingId: string) {
     return { error: "Order not found" };
   }
 
+  if (order.hospitalId !== actor.hospitalId) {
+    return { error: "That billing record does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && order.facilityId !== actor.facilityId) {
+    return { error: "That billing record does not belong to your facility" };
+  }
+
   if (
     !canTransition(order.status as OrderStatus, "PAID", "accounts") ||
     !canTransition("PAID", "ROUTED_TO_LAB", "system")
@@ -230,6 +263,20 @@ export async function confirmPayment(billingId: string) {
 
 export async function collectSample(orderId: string) {
   const actor = await requireProviderSession(["lab_tech", "admin"]);
+  const order = await getOrderStatus(orderId);
+
+  if (!order) {
+    return { error: "Order not found" };
+  }
+
+  if (order.hospitalId !== actor.hospitalId) {
+    return { error: "That order does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && order.labId !== actor.facilityId) {
+    return { error: "That order is not assigned to your lab" };
+  }
+
   const result = await transitionOrder({
     orderId,
     nextStatus: "SAMPLE_COLLECTED",
@@ -256,6 +303,14 @@ export async function uploadResult(orderId: string, rawText: string) {
   const order = await getOrderStatus(orderId);
   if (!order) {
     return { error: "Order not found" };
+  }
+
+  if (order.hospitalId !== actor.hospitalId) {
+    return { error: "That order does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && order.labId !== actor.facilityId) {
+    return { error: "That order is not assigned to your lab" };
   }
 
   if (
@@ -402,6 +457,14 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
     return { error: "Order not found" };
   }
 
+  if (order.hospitalId !== actor.hospitalId) {
+    return { error: "That order does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && order.facilityId !== actor.facilityId) {
+    return { error: "That order does not belong to your clinic" };
+  }
+
   if (
     !canTransition(order.status as OrderStatus, "ACTION_PLAN_APPROVED", "doctor") ||
     !canTransition("ACTION_PLAN_APPROVED", "PATIENT_NOTIFIED", "system")
@@ -431,10 +494,10 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
   let createdPrescriptionId: string | null = null;
 
   if (wantsPrescription) {
-    const pharmacy = await getFacilityByType("pharmacy");
+    const pharmacy = await getFacilityByType(actor.hospitalId, "pharmacy");
     if (!pharmacy) {
       await db.delete(actionPlans).where(eq(actionPlans.id, createdPlan.id));
-      return { error: "No pharmacy facility has been configured yet" };
+      return { error: "No pharmacy facility has been configured for this hospital yet" };
     }
 
     const [prescription] = await db.insert(prescriptions).values({
@@ -509,11 +572,16 @@ export async function inviteStaff(formData: FormData) {
   const actor = await requireProviderSession(["admin"]);
   const name = (formData.get("name") as string | null)?.trim();
   const email = (formData.get("email") as string | null)?.trim().toLowerCase();
-  const role = formData.get("role") as "doctor" | "accounts" | "lab_tech" | "pharmacist" | "admin" | null;
+  const role = formData.get("role") as "doctor" | "accounts" | "lab_tech" | "pharmacist" | null;
   const facilityId = (formData.get("facilityId") as string | null)?.trim();
 
   if (!name || !email || !role || !facilityId) {
     return { success: false, error: "Name, email, role, and facility are required" };
+  }
+
+  const facility = await findFacilityInHospital(actor.hospitalId, facilityId);
+  if (!facility) {
+    return { success: false, error: "That facility does not belong to your hospital" };
   }
 
   const [existingUser] = await db
@@ -526,7 +594,10 @@ export async function inviteStaff(formData: FormData) {
     return { success: false, error: "A provider with this email already exists for that facility" };
   }
 
+  const token = generateStaffInviteToken();
+
   await db.insert(staffInvites).values({
+    token,
     facilityId,
     email,
     role,
@@ -537,7 +608,11 @@ export async function inviteStaff(formData: FormData) {
 
   revalidatePath("/admin/staff");
 
-  return { success: true };
+  return {
+    success: true,
+    inviteLink: buildStaffInviteLink(token),
+    facilityName: facility.name,
+  };
 }
 
 export async function createOrderWithNewPatient(formData: FormData) {
@@ -554,9 +629,9 @@ export async function createOrderWithNewPatient(formData: FormData) {
   }
 
   try {
-    const lab = await getFacilityByType("lab");
+    const lab = await getFacilityByType(actor.hospitalId, "lab");
     if (!lab) {
-      return { success: false, error: "No lab facility has been configured yet" };
+      return { success: false, error: "No lab facility has been configured for this hospital yet" };
     }
 
     // Create patient first
@@ -626,12 +701,37 @@ export async function createOrderWithNewPatient(formData: FormData) {
 }
 
 export async function updateResult(resultId: string, rawText: string) {
-  await requireProviderSession(["lab_tech", "admin"]);
+  const actor = await requireProviderSession(["lab_tech", "admin"]);
   if (!rawText.trim()) {
     return { success: false, error: "Result text is required" };
   }
 
-  // Update the lab result raw text
+  const [resultContext] = await db
+    .select({
+      id: labResults.id,
+      orderId: labResults.orderId,
+      labUserId: labResults.labUserId,
+      labId: diagnosticOrders.labId,
+      hospitalId: facilities.hospitalId,
+    })
+    .from(labResults)
+    .innerJoin(diagnosticOrders, eq(labResults.orderId, diagnosticOrders.id))
+    .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
+    .where(eq(labResults.id, resultId))
+    .limit(1);
+
+  if (!resultContext) {
+    return { success: false, error: "Lab result not found" };
+  }
+
+  if (resultContext.hospitalId !== actor.hospitalId) {
+    return { success: false, error: "That result does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && resultContext.labId !== actor.facilityId) {
+    return { success: false, error: "That result does not belong to your lab" };
+  }
+
   const [updatedResult] = await db
     .update(labResults)
     .set({ rawText })
@@ -696,15 +796,36 @@ export async function updateResult(resultId: string, rawText: string) {
 }
 
 export async function redeemPrescription(prescriptionId: string, code: string) {
-  await requireProviderSession(["pharmacist", "admin"]);
+  const actor = await requireProviderSession(["pharmacist", "admin"]);
   const [prescription] = await db
-    .select()
+    .select({
+      id: prescriptions.id,
+      orderId: prescriptions.orderId,
+      patientId: prescriptions.patientId,
+      pharmacyId: prescriptions.pharmacyId,
+      items: prescriptions.items,
+      status: prescriptions.status,
+      attestationUid: prescriptions.attestationUid,
+      redemptionCode: prescriptions.redemptionCode,
+      redeemedAt: prescriptions.redeemedAt,
+      createdAt: prescriptions.createdAt,
+      hospitalId: facilities.hospitalId,
+    })
     .from(prescriptions)
+    .innerJoin(facilities, eq(prescriptions.pharmacyId, facilities.id))
     .where(eq(prescriptions.id, prescriptionId))
     .limit(1);
 
   if (!prescription) {
     return { success: false, error: "Prescription not found" };
+  }
+
+  if (prescription.hospitalId !== actor.hospitalId) {
+    return { success: false, error: "That prescription does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && prescription.pharmacyId !== actor.facilityId) {
+    return { success: false, error: "That prescription does not belong to your pharmacy" };
   }
 
   if (prescription.redemptionCode !== code.trim()) {
@@ -738,14 +859,10 @@ export async function promoteToAdmin(targetUserId: string) {
     return { error: "Cannot promote yourself" };
   }
 
-  const [targetUser] = await db
-    .select({ id: facilityUsers.id, role: facilityUsers.role })
-    .from(facilityUsers)
-    .where(eq(facilityUsers.id, targetUserId))
-    .limit(1);
+  const targetUser = await findFacilityUserInHospital(actor.hospitalId, targetUserId);
 
   if (!targetUser) {
-    return { error: "User not found" };
+    return { error: "User not found in your hospital" };
   }
 
   if (targetUser.role === "admin") {
@@ -758,6 +875,116 @@ export async function promoteToAdmin(targetUserId: string) {
     .where(eq(facilityUsers.id, targetUserId));
 
   revalidatePath("/settings");
+  revalidatePath("/admin/staff");
+
+  return { success: true };
+}
+
+export async function updateFacilityWallet(formData: FormData) {
+  const actor = await requireProviderSession(["admin"]);
+  const facilityId = (formData.get("facilityId") as string | null)?.trim();
+  const walletAddress = (formData.get("walletAddress") as string | null)?.trim();
+
+  if (!facilityId || !walletAddress) {
+    return { success: false, error: "Facility and wallet address are required" };
+  }
+
+  if (!isAddress(walletAddress)) {
+    return { success: false, error: "Wallet address is invalid" };
+  }
+
+  const facility = await findFacilityInHospital(actor.hospitalId, facilityId);
+  if (!facility) {
+    return { success: false, error: "Facility not found in your hospital" };
+  }
+
+  await db
+    .update(facilities)
+    .set({
+      walletAddress,
+      verificationStatus: facility.ensName ? "provisioned" : "pending",
+      verifiedAt: null,
+    })
+    .where(eq(facilities.id, facilityId));
+
+  revalidatePath("/settings");
+
+  return { success: true };
+}
+
+export async function verifyFacilityEns(formData: FormData) {
+  const actor = await requireProviderSession(["admin"]);
+  const facilityId = (formData.get("facilityId") as string | null)?.trim();
+
+  if (!facilityId) {
+    return { success: false, error: "Facility is required" };
+  }
+
+  const facility = await findFacilityInHospital(actor.hospitalId, facilityId);
+  if (!facility) {
+    return { success: false, error: "Facility not found in your hospital" };
+  }
+
+  if (!facility.ensName) {
+    return { success: false, error: "Provision ENS for this facility first" };
+  }
+
+  if (!facility.walletAddress || !isAddress(facility.walletAddress)) {
+    return { success: false, error: "Set a valid facility wallet address first" };
+  }
+
+  const metadata = getFacilityMetadata(facility.metadata);
+  const state =
+    typeof metadata.state === "string" && metadata.state.trim()
+      ? metadata.state.trim()
+      : "";
+  const lga =
+    typeof metadata.lga === "string" && metadata.lga.trim()
+      ? metadata.lga.trim()
+      : "";
+  const description =
+    typeof metadata.address === "string" && metadata.address.trim()
+      ? `${facility.name}, ${metadata.address.trim()}`
+      : `${facility.name}, ${state || actor.hospitalName}`;
+
+  const syncResult = await syncProvisionedFacilityENS({
+    ensName: facility.ensName,
+    address: facility.walletAddress as `0x${string}`,
+    name: facility.name,
+    type: facility.type,
+    state,
+    lga,
+    description,
+  });
+
+  if ("error" in syncResult) {
+    return { success: false, error: syncResult.error };
+  }
+
+  clearEnsProfileCache(facility.ensName);
+  const profile = await resolveEnsProfile(facility.ensName);
+  const isVerified =
+    Boolean(profile?.address) &&
+    profile?.address?.toLowerCase() === facility.walletAddress.toLowerCase() &&
+    profile?.verified === "true" &&
+    profile?.facilityType === facility.type;
+
+  await db
+    .update(facilities)
+    .set({
+      verificationStatus: isVerified ? "verified" : "provisioned",
+      verifiedAt: isVerified ? new Date() : null,
+    })
+    .where(eq(facilities.id, facility.id));
+
+  revalidatePath("/settings");
+
+  if (!isVerified) {
+    return {
+      success: false,
+      error: "ENS was updated, but runtime verification has not passed yet",
+    };
+  }
 
   return { success: true };
 }

@@ -9,6 +9,7 @@ interface StaffMember {
   role: string;
   email: string | null;
   isActive: boolean;
+  facilityName: string;
 }
 
 export function SettingsClient({
@@ -24,7 +25,7 @@ export function SettingsClient({
   async function handlePromote(userId: string, userName: string) {
     if (
       !confirm(
-        `Grant admin privileges to ${userName}? This cannot be undone easily.`,
+        `Grant hospital admin privileges to ${userName}? This affects access across the hospital network.`,
       )
     ) {
       return;
@@ -60,8 +61,8 @@ export function SettingsClient({
           <div>
             <p className="text-sm font-semibold">{s.name}</p>
             <p className="mt-0.5 text-xs text-[#6d6d6d]">
-              {s.email || "No email"} &middot;{" "}
-              {s.role.replace("_", " ")}
+              {s.email || "No email"} &middot; {s.role.replace("_", " ")} &middot;{" "}
+              {s.facilityName}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -74,6 +75,11 @@ export function SettingsClient({
             >
               {s.isActive ? "Active" : "Inactive"}
             </span>
+            {s.role === "admin" && (
+              <span className="rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                Hospital admin
+              </span>
+            )}
             {s.role !== "admin" && s.id !== currentUserId && (
               <button
                 type="button"
@@ -81,7 +87,7 @@ export function SettingsClient({
                 disabled={promoting === s.id}
                 className="rounded-full border border-black bg-black px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-white transition-opacity hover:opacity-80 disabled:opacity-50"
               >
-                {promoting === s.id ? "Promoting..." : "Grant Admin"}
+                {promoting === s.id ? "Promoting..." : "Grant Hospital Admin"}
               </button>
             )}
           </div>
@@ -89,7 +95,7 @@ export function SettingsClient({
       ))}
       {staff.length === 0 && (
         <p className="py-4 text-center text-sm text-[#6d6d6d]">
-          No staff members yet
+          No hospital staff members linked yet
         </p>
       )}
     </div>

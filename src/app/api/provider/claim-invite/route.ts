@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, gte, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { staffInvites, facilityUsers, facilities } from "@/lib/db/schema";
+import { staffInvites, facilityUsers, facilities, hospitals } from "@/lib/db/schema";
 import {
   extractBearerToken,
   getDynamicDisplayName,
   verifyDynamicToken,
 } from "@/lib/auth/dynamic";
 import { setProviderSession } from "@/lib/auth/session";
+
+type ClaimInviteBody = {
+  email?: string;
+  name?: string;
+  phone?: string;
+  licenseNumber?: string;
+  token?: string;
+};
 
 export async function POST(request: Request) {
   try {
@@ -17,16 +25,15 @@ export async function POST(request: Request) {
     }
 
     const payload = await verifyDynamicToken(token);
-    const body = (await request.json()) as {
-      email?: string;
-      name?: string;
-      phone?: string;
-      licenseNumber?: string;
-    };
-
+    const body = (await request.json()) as ClaimInviteBody;
     const email = body.email?.trim().toLowerCase() ?? payload.email?.trim().toLowerCase();
-    if (!email) {
-      return NextResponse.json({ error: "Invite email is required" }, { status: 400 });
+    const inviteToken = body.token?.trim() || null;
+
+    if (!inviteToken && !email) {
+      return NextResponse.json(
+        { error: "An invite token or email address is required to claim access" },
+        { status: 400 },
+      );
     }
 
     const [existingUser] = await db
@@ -43,25 +50,59 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
-    const [invite] = await db
-      .select()
+    const inviteQuery = db
+      .select({
+        id: staffInvites.id,
+        token: staffInvites.token,
+        facilityId: staffInvites.facilityId,
+        role: staffInvites.role,
+        name: staffInvites.name,
+        email: staffInvites.email,
+        claimedAt: staffInvites.claimedAt,
+        expiresAt: staffInvites.expiresAt,
+        facilityName: facilities.name,
+        hospitalId: hospitals.id,
+        hospitalName: hospitals.name,
+      })
       .from(staffInvites)
+      .innerJoin(facilities, eq(staffInvites.facilityId, facilities.id))
+      .innerJoin(hospitals, eq(facilities.hospitalId, hospitals.id))
       .where(
         and(
-          eq(staffInvites.email, email),
           isNull(staffInvites.claimedAt),
           or(isNull(staffInvites.expiresAt), gte(staffInvites.expiresAt, now)),
+          inviteToken ? eq(staffInvites.token, inviteToken) : eq(staffInvites.email, email as string),
         ),
       )
-      .orderBy(desc(staffInvites.createdAt))
-      .limit(1);
+      .orderBy(desc(staffInvites.createdAt));
 
-    if (!invite) {
+    const invites = await inviteQuery;
+
+    if (!invites.length) {
       return NextResponse.json(
-        { error: "No invitation found for this email address" },
+        { error: inviteToken ? "Invitation link is invalid or expired" : "No invitation found for this email address" },
         { status: 404 },
       );
     }
+
+    if (!inviteToken && invites.length > 1) {
+      return NextResponse.json(
+        {
+          error: "Multiple invites found for this email address",
+          selectionRequired: true,
+          invites: invites.map((invite) => ({
+            token: invite.token,
+            role: invite.role,
+            facilityName: invite.facilityName,
+            hospitalName: invite.hospitalName,
+            name: invite.name,
+          })),
+        },
+        { status: 409 },
+      );
+    }
+
+    const invite = invites[0];
 
     if (invite.expiresAt && invite.expiresAt < now) {
       return NextResponse.json({ error: "This invite has expired" }, { status: 410 });
@@ -74,7 +115,7 @@ export async function POST(request: Request) {
         dynamicId: payload.sub,
         role: invite.role,
         name: invite.name || body.name || getDynamicDisplayName(payload),
-        email,
+        email: invite.email ?? email ?? null,
         phone: body.phone ?? null,
         licenseNumber: body.licenseNumber ?? null,
       })
@@ -88,18 +129,14 @@ export async function POST(request: Request) {
       })
       .where(eq(staffInvites.id, invite.id));
 
-    const [facility] = await db
-      .select({ name: facilities.name })
-      .from(facilities)
-      .where(eq(facilities.id, user.facilityId))
-      .limit(1);
-
     const response = NextResponse.json({
       success: true,
       userId: user.id,
       role: user.role,
+      hospitalId: invite.hospitalId,
+      hospitalName: invite.hospitalName,
       facilityId: user.facilityId,
-      facilityName: facility?.name ?? "Pisgah Facility",
+      facilityName: invite.facilityName,
     });
 
     await setProviderSession(response.cookies, {
@@ -107,8 +144,10 @@ export async function POST(request: Request) {
       dynamicUserId: payload.sub,
       facilityUserId: user.id,
       role: user.role,
+      hospitalId: invite.hospitalId,
+      hospitalName: invite.hospitalName,
       facilityId: user.facilityId,
-      facilityName: facility?.name ?? "Pisgah Facility",
+      facilityName: invite.facilityName,
       name: user.name,
       email: user.email,
     });

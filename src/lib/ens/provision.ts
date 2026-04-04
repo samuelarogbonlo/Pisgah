@@ -10,6 +10,22 @@ function generateSlug(name: string): string {
     .replace(/-$/, "");
 }
 
+function buildFacilityTextRecords(params: {
+  name: string;
+  type: "clinic" | "lab" | "pharmacy";
+  state: string;
+  lga: string;
+  description?: string;
+}) {
+  return {
+    description: params.description || `${params.name}, ${params.state}`,
+    "pisgah.facility.type": params.type,
+    "pisgah.facility.state": params.state,
+    "pisgah.facility.lga": params.lga,
+    "pisgah.facility.verified": "true",
+  } satisfies Record<string, string>;
+}
+
 export async function provisionFacilityENS(params: {
   name: string;
   type: "clinic" | "lab" | "pharmacy";
@@ -23,14 +39,7 @@ export async function provisionFacilityENS(params: {
   const ns = new NameStone(apiKey);
   const baseSlug = generateSlug(params.name);
   const domain = "pisgah.eth";
-
-  const textRecords: Record<string, string> = {
-    description: params.description || `${params.name}, ${params.state}`,
-    "pisgah.facility.type": params.type,
-    "pisgah.facility.state": params.state,
-    "pisgah.facility.lga": params.lga,
-    "pisgah.facility.verified": "true",
-  };
+  const textRecords = buildFacilityTextRecords(params);
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
@@ -52,4 +61,40 @@ export async function provisionFacilityENS(params: {
   }
 
   return { error: "All ENS slug attempts exhausted (collision)" };
+}
+
+export async function syncProvisionedFacilityENS(params: {
+  ensName: string;
+  address: `0x${string}`;
+  name: string;
+  type: "clinic" | "lab" | "pharmacy";
+  state: string;
+  lga: string;
+  description?: string;
+}): Promise<{ ensName: string } | { error: string }> {
+  const apiKey = process.env.NAMESTONE_API_KEY;
+  if (!apiKey) return { error: "NAMESTONE_API_KEY not configured" };
+
+  const parts = params.ensName.split(".");
+  if (parts.length < 3) {
+    return { error: "Facility ENS name is invalid" };
+  }
+
+  const [name, ...domainParts] = parts;
+  const domain = domainParts.join(".");
+  const ns = new NameStone(apiKey);
+
+  try {
+    await ns.setName({
+      name,
+      domain,
+      address: params.address,
+      text_records: buildFacilityTextRecords(params),
+    });
+
+    return { ensName: params.ensName };
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    return { error: error?.message || "Failed to update ENS facility record" };
+  }
 }

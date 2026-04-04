@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { facilityUsers, facilities } from "@/lib/db/schema";
+import { facilityUsers, facilities, hospitals } from "@/lib/db/schema";
 import {
   extractBearerToken,
   getDynamicDisplayName,
@@ -31,10 +31,13 @@ export async function POST(request: Request) {
         name: facilityUsers.name,
         email: facilityUsers.email,
         isActive: facilityUsers.isActive,
+        hospitalId: hospitals.id,
+        hospitalName: hospitals.name,
         facilityName: facilities.name,
       })
       .from(facilityUsers)
       .innerJoin(facilities, eq(facilityUsers.facilityId, facilities.id))
+      .innerJoin(hospitals, eq(facilities.hospitalId, hospitals.id))
       .where(
         and(
           eq(facilityUsers.dynamicId, payload.sub),
@@ -60,6 +63,8 @@ export async function POST(request: Request) {
       session: {
         userId: user.id,
         role: user.role,
+        hospitalId: user.hospitalId,
+        hospitalName: user.hospitalName,
         facilityId: user.facilityId,
         facilityName: user.facilityName,
         name: user.name,
@@ -71,6 +76,8 @@ export async function POST(request: Request) {
       dynamicUserId: user.dynamicId,
       facilityUserId: user.id,
       role: user.role,
+      hospitalId: user.hospitalId,
+      hospitalName: user.hospitalName,
       facilityId: user.facilityId,
       facilityName: user.facilityName,
       name: user.name,

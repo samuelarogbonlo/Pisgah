@@ -9,7 +9,10 @@ export function InviteStaffForm({
   facilities: Array<{ id: string; label: string }>;
 }) {
   const [isPending, startTransition] = useTransition();
-  const [success, setSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{
+    message: string;
+    inviteLink: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function handleAction(formData: FormData) {
@@ -23,7 +26,11 @@ export function InviteStaffForm({
         return;
       }
 
-      setSuccess("Invite created. The staff member can now sign in with Dynamic and claim access.");
+      setSuccess({
+        message:
+          "Hospital staff invite created. Share the invite link so the user lands in the correct hospital and facility.",
+        inviteLink: "inviteLink" in result ? result.inviteLink ?? null : null,
+      });
     });
   }
 
@@ -72,13 +79,15 @@ export function InviteStaffForm({
             <option value="accounts">Accounts</option>
             <option value="lab_tech">Lab Tech</option>
             <option value="pharmacist">Pharmacist</option>
-            <option value="admin">Admin</option>
           </select>
+          <p className="mt-2 text-xs text-gray-500">
+            Hospital admins are promoted after the staff account has been activated.
+          </p>
         </label>
 
         <label className="block">
           <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-gray-500">
-            Facility
+            Assigned Facility
           </span>
           <select
             name="facilityId"
@@ -103,13 +112,18 @@ export function InviteStaffForm({
         disabled={isPending}
         className="inline-flex rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
       >
-        {isPending ? "Sending..." : "Create Invite"}
+        {isPending ? "Sending..." : "Send Invite"}
       </button>
 
       {success && (
-        <p className="rounded-[8px] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          {success}
-        </p>
+        <div className="rounded-[8px] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          <p>{success.message}</p>
+          {success.inviteLink && (
+            <p className="mt-2 break-all font-mono text-xs text-green-800">
+              {success.inviteLink}
+            </p>
+          )}
+        </div>
       )}
 
       {error && (

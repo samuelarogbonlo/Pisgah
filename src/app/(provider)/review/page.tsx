@@ -55,7 +55,12 @@ export default async function ReviewPage() {
       ensName: facilities.ensName,
     })
     .from(facilities)
-    .where(eq(facilities.type, "pharmacy"))
+    .where(
+      and(
+        eq(facilities.type, "pharmacy"),
+        eq(facilities.hospitalId, session.hospitalId),
+      ),
+    )
     .limit(1);
 
   const draftsMap: Record<

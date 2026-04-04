@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DynamicWidget, getAuthToken, useDynamicContext, useIsLoggedIn } from "@dynamic-labs/sdk-react-core";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SetupHospitalForm } from "./setup-hospital-form";
 
 type SessionBootstrapResponse =
@@ -14,6 +14,14 @@ type SessionBootstrapResponse =
       name?: string | null;
     };
 
+type InviteSelection = {
+  token: string;
+  role: string;
+  facilityName: string;
+  hospitalName: string;
+  name: string;
+};
+
 function hasSession(
   payload: SessionBootstrapResponse | null,
 ): payload is Extract<SessionBootstrapResponse, { success: true }> {
@@ -22,15 +30,21 @@ function hasSession(
 
 export function LoginClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isLoggedIn = useIsLoggedIn();
   const { sdkHasLoaded, user } = useDynamicContext();
   const [checkingSession, setCheckingSession] = useState(false);
   const [sessionResult, setSessionResult] = useState<SessionBootstrapResponse | null>(null);
-  const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [phone, setPhone] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [inviteChoices, setInviteChoices] = useState<InviteSelection[]>([]);
+  const [autoClaimAttempted, setAutoClaimAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Refs to prevent infinite re-fetch loops caused by Dynamic SDK flickering
+  const hasAttemptedSync = useRef(false);
+  const profileRef = useRef<{ email?: string; name?: string }>({ email: undefined, name: undefined });
 
   const profile = useMemo(
     () => ({
@@ -43,12 +57,33 @@ export function LoginClient() {
     [user],
   );
 
+  // Keep profileRef in sync without triggering effects
+  profileRef.current = profile;
+
+  // Reset only on genuine logout (stable false, not flicker)
+  const wasLoggedIn = useRef(false);
   useEffect(() => {
-    if (!sdkHasLoaded || !isLoggedIn || checkingSession || hasSession(sessionResult)) {
+    if (isLoggedIn) {
+      wasLoggedIn.current = true;
+    } else if (wasLoggedIn.current) {
+      // Genuine logout — user was logged in, now isn't
+      wasLoggedIn.current = false;
+      hasAttemptedSync.current = false;
+      setSessionResult(null);
+      setCheckingSession(false);
+      setInviteChoices([]);
+      setAutoClaimAttempted(false);
+      setError(null);
+    }
+  }, [isLoggedIn]);
+
+  // Session sync — fires ONCE per login, never re-triggers
+  useEffect(() => {
+    if (!sdkHasLoaded || !isLoggedIn || hasAttemptedSync.current) {
       return;
     }
 
-    let cancelled = false;
+    hasAttemptedSync.current = true;
 
     async function syncSession() {
       try {
@@ -57,6 +92,7 @@ export function LoginClient() {
 
         const token = getAuthToken();
         if (!token) {
+          setCheckingSession(false);
           return;
         }
 
@@ -66,13 +102,10 @@ export function LoginClient() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(profile),
+          body: JSON.stringify(profileRef.current),
         });
 
         const payload = (await response.json()) as SessionBootstrapResponse;
-        if (cancelled) {
-          return;
-        }
 
         if (response.ok && "success" in payload && payload.success) {
           router.replace("/dashboard");
@@ -82,57 +115,22 @@ export function LoginClient() {
 
         setSessionResult(payload);
       } catch (syncError) {
-        if (!cancelled) {
-          setError(syncError instanceof Error ? syncError.message : "Unable to start Pisgah session");
-        }
+        setError(syncError instanceof Error ? syncError.message : "Unable to start Pisgah session");
       } finally {
-        if (!cancelled) {
-          setCheckingSession(false);
-        }
+        setCheckingSession(false);
       }
     }
 
     void syncSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [checkingSession, isLoggedIn, profile, router, sdkHasLoaded, sessionResult]);
+  }, [sdkHasLoaded, isLoggedIn, router]);
 
   const needsOnboarding =
     sessionResult !== null &&
     "needsOnboarding" in sessionResult &&
     sessionResult.needsOnboarding === true;
+  const inviteToken = searchParams.get("invite")?.trim() || null;
 
-  useEffect(() => {
-    if (!needsOnboarding || setupComplete !== null) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function checkSetup() {
-      try {
-        const response = await fetch("/api/provider/check-setup");
-        const payload = (await response.json()) as { setupComplete: boolean };
-        if (!cancelled) {
-          setSetupComplete(payload.setupComplete);
-        }
-      } catch {
-        if (!cancelled) {
-          setSetupComplete(false);
-        }
-      }
-    }
-
-    void checkSetup();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [needsOnboarding, setupComplete]);
-
-  function handleClaimInvite() {
+  function handleClaimInvite(selectedToken?: string) {
     startTransition(async () => {
       try {
         setError(null);
@@ -152,14 +150,24 @@ export function LoginClient() {
             name: sessionResult && "name" in sessionResult ? sessionResult.name ?? profile.name : profile.name,
             phone,
             licenseNumber,
+            token: selectedToken ?? inviteToken ?? undefined,
           }),
         });
 
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as {
+          error?: string;
+          selectionRequired?: boolean;
+          invites?: InviteSelection[];
+        };
         if (!response.ok) {
+          if (payload.selectionRequired && payload.invites?.length) {
+            setInviteChoices(payload.invites);
+            return;
+          }
           throw new Error(payload.error ?? "Unable to claim invite");
         }
 
+        setInviteChoices([]);
         router.replace("/dashboard");
         router.refresh();
       } catch (claimError) {
@@ -167,6 +175,15 @@ export function LoginClient() {
       }
     });
   }
+
+  useEffect(() => {
+    if (!needsOnboarding || !inviteToken || autoClaimAttempted || !sdkHasLoaded || !isLoggedIn) {
+      return;
+    }
+
+    setAutoClaimAttempted(true);
+    handleClaimInvite(inviteToken);
+  }, [autoClaimAttempted, inviteToken, isLoggedIn, needsOnboarding, sdkHasLoaded]);
 
   return (
     <div className="min-h-screen bg-[#f3f3f1] px-6 py-10">
@@ -182,16 +199,22 @@ export function LoginClient() {
           <p className="mt-4 max-w-xl text-sm leading-7 text-[#6d6d6d]">
             Dynamic is the provider login path. If this account already belongs
             to Pisgah, you will land in the correct role workspace. Otherwise,
-            set up your hospital or claim a staff invite.
+            create your hospital or claim a staff invite.
           </p>
 
           <div className="mt-8 rounded-[10px] border border-black/10 bg-[#f8f8f6] p-5">
             <DynamicWidget />
           </div>
 
-          {checkingSession && (
+          {checkingSession && !needsOnboarding && (
             <p className="mt-4 text-sm text-[#6d6d6d]">
               Checking Pisgah access...
+            </p>
+          )}
+
+          {needsOnboarding && (
+            <p className="mt-4 text-sm text-green-700">
+              Dynamic login successful. Complete your onboarding →
             </p>
           )}
 
@@ -229,19 +252,13 @@ export function LoginClient() {
                 </p>
               </div>
 
-              {needsOnboarding && setupComplete === null && (
-                <p className="text-sm text-[#6d6d6d]">Checking hospital setup...</p>
-              )}
-
-              {needsOnboarding && setupComplete === false && (
-                <SetupHospitalForm
-                  dynamicToken={getAuthToken() ?? ""}
-                  profile={profile}
-                />
-              )}
-
-              {(!needsOnboarding || setupComplete === true) && (
+              {needsOnboarding && (
                 <>
+                  <SetupHospitalForm
+                    dynamicToken={getAuthToken() ?? ""}
+                    profile={profile}
+                  />
+
                   <div className="space-y-3">
                     <label className="block">
                       <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
@@ -271,23 +288,49 @@ export function LoginClient() {
                   <div className="rounded-[10px] border border-black/10 p-4">
                     <p className="text-sm font-semibold text-[#161616]">Claim a staff invite</p>
                     <p className="mt-1 text-sm leading-6 text-[#6d6d6d]">
-                      Use this if the hospital admin already added you in Staff Management.
+                      Use this if a hospital admin already invited you into Pisgah.
                     </p>
+                    {inviteToken && (
+                      <p className="mt-3 text-xs uppercase tracking-[0.14em] text-[#6d6d6d]">
+                        Invite link detected. Sign in and claim this hospital access.
+                      </p>
+                    )}
                     <button
                       type="button"
-                      onClick={handleClaimInvite}
+                      onClick={() => handleClaimInvite()}
                       disabled={isPending}
                       className="mt-4 inline-flex rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
                     >
                       {isPending ? "Working..." : "Claim Invite"}
                     </button>
+                    {inviteChoices.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-xs uppercase tracking-[0.14em] text-[#6d6d6d]">
+                          Choose your hospital invite
+                        </p>
+                        {inviteChoices.map((invite) => (
+                          <button
+                            key={invite.token}
+                            type="button"
+                            onClick={() => handleClaimInvite(invite.token)}
+                            className="flex w-full items-start justify-between rounded-[8px] border border-black/10 px-3 py-3 text-left transition-colors hover:bg-black/[0.03]"
+                          >
+                            <span>
+                              <span className="block text-sm font-semibold text-[#161616]">
+                                {invite.hospitalName}
+                              </span>
+                              <span className="mt-1 block text-xs text-[#6d6d6d]">
+                                {invite.facilityName} · {invite.role.replace("_", " ")}
+                              </span>
+                            </span>
+                            <span className="text-[10px] uppercase tracking-[0.16em] text-[#6d6d6d]">
+                              Claim
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-
-                  {needsOnboarding && setupComplete === true && (
-                    <p className="text-sm leading-6 text-[#6d6d6d]">
-                      No invite found? Contact your hospital administrator.
-                    </p>
-                  )}
                 </>
               )}
             </div>

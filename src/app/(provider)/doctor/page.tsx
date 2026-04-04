@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { diagnosticOrders, patients, facilities, testCatalog } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { CreateOrderForm } from "./create-order-form";
 import { requireProviderSession } from "@/lib/auth/session";
 
@@ -59,7 +59,12 @@ export default async function DoctorPage() {
     db
       .select({ name: facilities.name, ensName: facilities.ensName })
       .from(facilities)
-      .where(eq(facilities.type, "lab"))
+      .where(
+        and(
+          eq(facilities.type, "lab"),
+          eq(facilities.hospitalId, session.hospitalId),
+        ),
+      )
       .limit(1)
       .then((rows) => rows[0] ?? null),
   ]);

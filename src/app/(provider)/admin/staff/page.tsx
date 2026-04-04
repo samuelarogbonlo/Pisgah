@@ -2,10 +2,11 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { facilities, facilityUsers, staffInvites } from "@/lib/db/schema";
 import { requireProviderSession } from "@/lib/auth/session";
+import { buildStaffInviteLink } from "@/lib/auth/invites";
 import { InviteStaffForm } from "./staff-form";
 
 export default async function StaffAdminPage() {
-  await requireProviderSession(["admin"]);
+  const session = await requireProviderSession(["admin"]);
 
   const facilityRows = await db
     .select({
@@ -15,6 +16,7 @@ export default async function StaffAdminPage() {
       ensName: facilities.ensName,
     })
     .from(facilities)
+    .where(eq(facilities.hospitalId, session.hospitalId))
     .orderBy(facilities.name);
 
   const staffRows = await db
@@ -24,24 +26,29 @@ export default async function StaffAdminPage() {
       email: facilityUsers.email,
       role: facilityUsers.role,
       isActive: facilityUsers.isActive,
+      facilityId: facilityUsers.facilityId,
       facilityName: facilities.name,
     })
     .from(facilityUsers)
     .innerJoin(facilities, eq(facilityUsers.facilityId, facilities.id))
+    .where(eq(facilities.hospitalId, session.hospitalId))
     .orderBy(desc(facilityUsers.createdAt));
 
   const inviteRows = await db
     .select({
       id: staffInvites.id,
+      token: staffInvites.token,
       name: staffInvites.name,
       email: staffInvites.email,
       role: staffInvites.role,
       claimedAt: staffInvites.claimedAt,
       expiresAt: staffInvites.expiresAt,
+      facilityId: staffInvites.facilityId,
       facilityName: facilities.name,
     })
     .from(staffInvites)
     .innerJoin(facilities, eq(staffInvites.facilityId, facilities.id))
+    .where(eq(facilities.hospitalId, session.hospitalId))
     .orderBy(desc(staffInvites.createdAt));
 
   return (
@@ -49,21 +56,21 @@ export default async function StaffAdminPage() {
       <div>
         <p className="text-[10px] tracking-[0.22em] uppercase text-gray-500 flex items-center gap-2">
           <span className="inline-block w-5 h-px bg-black" />
-          Admin
+          Hospital Admin
         </p>
         <h2 className="mt-3 text-3xl tracking-tight leading-none">
-          Staff Management
+          {session.hospitalName} Staff Access
         </h2>
         <p className="mt-2 text-sm text-gray-500">
-          Invite real provider accounts into the correct facility and role.
+          Manage staff access across the clinic, lab, and pharmacy facilities in this hospital network.
         </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="rounded-[8px] border border-gray-200 bg-white p-4">
-          <h3 className="text-xl tracking-tight">Invite Staff</h3>
+          <h3 className="text-xl tracking-tight">Invite Hospital Staff</h3>
           <p className="mt-2 text-sm text-gray-500">
-            The invited user will sign in with Dynamic, then claim this invite to create their Pisgah access.
+            Assign a staff member to the right facility and role inside this hospital. Hospital admins are promoted after the account is active.
           </p>
 
           <InviteStaffForm
@@ -77,9 +84,9 @@ export default async function StaffAdminPage() {
         <div className="space-y-4">
           <section className="rounded-[8px] border border-gray-200 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl tracking-tight">Active Staff</h3>
+              <h3 className="text-xl tracking-tight">Hospital Staff</h3>
               <span className="text-xs uppercase tracking-[0.16em] text-gray-500">
-                {staffRows.length} linked accounts
+                {staffRows.length} linked accounts across {facilityRows.length} facilities
               </span>
             </div>
 
@@ -115,6 +122,16 @@ export default async function StaffAdminPage() {
                       </td>
                     </tr>
                   ))}
+                  {staffRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="py-5 text-center text-sm text-gray-500"
+                      >
+                        No hospital staff accounts have been linked yet.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -122,9 +139,9 @@ export default async function StaffAdminPage() {
 
           <section className="rounded-[8px] border border-gray-200 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl tracking-tight">Invites</h3>
+              <h3 className="text-xl tracking-tight">Facility Invites</h3>
               <span className="text-xs uppercase tracking-[0.16em] text-gray-500">
-                {inviteRows.length} issued
+                {inviteRows.length} issued across this hospital
               </span>
             </div>
 
@@ -146,6 +163,9 @@ export default async function StaffAdminPage() {
                         <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-gray-500">
                           {invite.role.replace("_", " ")}
                         </div>
+                        <div className="mt-2 break-all font-mono text-[11px] text-gray-500">
+                          {buildStaffInviteLink(invite.token)}
+                        </div>
                       </td>
                       <td className="border-b border-gray-100 py-3 pr-4 text-gray-700">
                         {invite.facilityName}
@@ -160,6 +180,16 @@ export default async function StaffAdminPage() {
                       </td>
                     </tr>
                   ))}
+                  {inviteRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="py-5 text-center text-sm text-gray-500"
+                      >
+                        No pending facility invites for this hospital network.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

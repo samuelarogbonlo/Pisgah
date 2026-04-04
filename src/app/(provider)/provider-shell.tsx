@@ -14,6 +14,18 @@ type ProviderShellSession = {
   verificationStatus: string | null;
 };
 
+function getEnsStatusLabel(verificationStatus: string | null, ensName: string | null) {
+  if (verificationStatus === "verified") {
+    return "ENS Verified";
+  }
+
+  if (verificationStatus === "provisioned" || ensName) {
+    return "ENS Provisioned";
+  }
+
+  return "Verification Pending";
+}
+
 const NAV_ITEMS: Array<{
   href: string;
   label: string;
@@ -26,7 +38,6 @@ const NAV_ITEMS: Array<{
   { href: "/lab", label: "Lab", roles: ["lab_tech", "admin"] },
   { href: "/review", label: "Doctor Review", roles: ["doctor", "admin"] },
   { href: "/pharmacy", label: "Pharmacy", roles: ["pharmacist", "admin"] },
-  { href: "/admin/staff", label: "Staff", roles: ["admin"] },
   { href: "/settings", label: "Settings", roles: ["admin"] },
 ];
 
@@ -78,7 +89,7 @@ export function ProviderShell({
             {session.ensName ?? "ENS pending"}
           </span>
           <span className="mt-2 inline-flex rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[#6d6d6d]">
-            {session.verificationStatus === "verified" ? "ENS Verified" : "Verification Pending"}
+            {getEnsStatusLabel(session.verificationStatus, session.ensName)}
           </span>
         </div>
 

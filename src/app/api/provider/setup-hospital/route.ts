@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { facilities, facilityUsers, testCatalog } from "@/lib/db/schema";
+import { facilities, facilityUsers, hospitals } from "@/lib/db/schema";
 import {
   extractBearerToken,
   getDynamicDisplayName,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/dynamic";
 import { setProviderSession } from "@/lib/auth/session";
 import { provisionFacilityENS } from "@/lib/ens/provision";
+import { slugifyHospitalName } from "@/lib/hospitals/scope";
 
 interface DepartmentInput {
   name: string;
@@ -18,7 +19,7 @@ interface DepartmentInput {
 interface SetupHospitalBody {
   hospitalName: string;
   state: string;
-  lga: string;
+  lga?: string;
   address?: string;
   phone?: string;
   email?: string;
@@ -26,177 +27,253 @@ interface SetupHospitalBody {
   departments: DepartmentInput[];
 }
 
-const DEFAULT_TEST_CATALOG = [
-  { testName: "Complete Blood Count", price: "5000" },
-  { testName: "Malaria RDT", price: "3500" },
-  { testName: "Urinalysis", price: "6000" },
-  { testName: "Liver Function", price: "12000" },
-  { testName: "Renal Function", price: "14000" },
-];
+async function generateHospitalSlug(hospitalName: string) {
+  const baseSlug = slugifyHospitalName(hospitalName) || "hospital";
+  const existing = await db
+    .select({ slug: hospitals.slug })
+    .from(hospitals)
+    .where(like(hospitals.slug, `${baseSlug}%`));
+
+  if (!existing.some((row) => row.slug === baseSlug)) {
+    return baseSlug;
+  }
+
+  let suffix = 2;
+  while (existing.some((row) => row.slug === `${baseSlug}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${baseSlug}-${suffix}`;
+}
 
 export async function POST(request: Request) {
   try {
-    // 1. Verify Dynamic bearer token
     const token = extractBearerToken(request);
     if (!token) {
-      return NextResponse.json(
-        { error: "Missing bearer token" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Missing bearer token" }, { status: 401 });
     }
 
     const dynamicPayload = await verifyDynamicToken(token);
+    const body = (await request.json()) as SetupHospitalBody;
+    const hospitalName = body.hospitalName?.trim();
+    const state = body.state?.trim();
+    const lga = body.lga?.trim() || null;
+    const address = body.address?.trim() || null;
+    const phone = body.phone?.trim() || null;
+    const email = body.email?.trim().toLowerCase() || dynamicPayload.email?.trim().toLowerCase() || null;
 
-    // 2. First-admin guard
-    const [existingAdmin] = await db
-      .select({ id: facilityUsers.id })
-      .from(facilityUsers)
-      .where(eq(facilityUsers.role, "admin"))
-      .limit(1);
-
-    if (existingAdmin) {
-      return NextResponse.json(
-        { error: "Hospital already set up" },
-        { status: 403 },
-      );
+    if (!hospitalName) {
+      return NextResponse.json({ error: "Hospital name is required" }, { status: 400 });
     }
 
-    // 3. Parse and validate body
-    const body = (await request.json()) as SetupHospitalBody;
-
-    if (!body.hospitalName?.trim()) {
-      return NextResponse.json(
-        { error: "Hospital name is required" },
-        { status: 400 },
-      );
+    if (!state) {
+      return NextResponse.json({ error: "State is required" }, { status: 400 });
     }
 
     if (!Array.isArray(body.departments) || body.departments.length === 0) {
-      return NextResponse.json(
-        { error: "At least one department is required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "At least one department is required" }, { status: 400 });
     }
 
-    const hasClinic = body.departments.some((d) => d.type === "clinic");
-    if (!hasClinic) {
+    const departments = body.departments
+      .map((department) => ({
+        name: department.name?.trim(),
+        type: department.type,
+      }))
+      .filter((department) => Boolean(department.name)) as DepartmentInput[];
+
+    if (departments.length === 0) {
+      return NextResponse.json({ error: "At least one department is required" }, { status: 400 });
+    }
+
+    if (!departments.some((department) => department.type === "clinic")) {
       return NextResponse.json(
         { error: "At least one clinic department is required" },
         { status: 400 },
       );
     }
 
-    // 4. Create facilities and provision ENS for each department
-    const createdFacilities: Array<{
-      id: string;
-      name: string;
-      type: string;
-      ensName: string | null;
-      verificationStatus: string;
-    }> = [];
+    const [existingUser] = await db
+      .select({ id: facilityUsers.id })
+      .from(facilityUsers)
+      .where(eq(facilityUsers.dynamicId, dynamicPayload.sub))
+      .limit(1);
 
-    for (const dept of body.departments) {
-      const ensResult = await provisionFacilityENS({
-        name: dept.name,
-        type: dept.type,
-        state: body.state,
-        lga: body.lga,
-      });
-
-      const ensSuccess = "ensName" in ensResult;
-
-      const [facility] = await db
-        .insert(facilities)
-        .values({
-          name: dept.name,
-          type: dept.type,
-          ensName: ensSuccess ? ensResult.ensName : null,
-          verificationStatus: ensSuccess ? "verified" : "pending",
-          verifiedAt: ensSuccess ? new Date() : null,
-          metadata: {
-            hospitalName: body.hospitalName,
-            state: body.state,
-            lga: body.lga,
-            address: body.address || null,
-            phone: body.phone || null,
-            email: body.email || null,
-          },
-        })
-        .returning();
-
-      createdFacilities.push({
-        id: facility.id,
-        name: facility.name,
-        type: facility.type,
-        ensName: facility.ensName,
-        verificationStatus: facility.verificationStatus,
-      });
-    }
-
-    // 5. Find the clinic facility (first one with type "clinic")
-    const clinicFacility = createdFacilities.find((f) => f.type === "clinic");
-    if (!clinicFacility) {
+    if (existingUser) {
       return NextResponse.json(
-        { error: "Clinic facility creation failed" },
-        { status: 500 },
+        { error: "This Dynamic account is already linked to Pisgah" },
+        { status: 409 },
       );
     }
 
-    // 6. Insert default test catalog for clinic
-    await db.insert(testCatalog).values(
-      DEFAULT_TEST_CATALOG.map((test) => ({
-        facilityId: clinicFacility.id,
-        testName: test.testName,
-        price: test.price,
-      })),
-    );
+    const hospitalSlug = await generateHospitalSlug(hospitalName);
+    const adminName = body.adminName?.trim() || getDynamicDisplayName(dynamicPayload, "Hospital Admin");
+    const facilitiesMetadata = {
+      hospitalName,
+      state,
+      lga,
+      address,
+      phone,
+      email,
+    };
 
-    // 7. Create admin user linked to clinic
-    const adminName =
-      body.adminName ||
-      getDynamicDisplayName(dynamicPayload, "Hospital Admin");
+    const setupResult = await db.execute(sql`
+      with new_hospital as (
+        insert into hospitals (name, slug, state, lga, address, phone, email)
+        values (
+          ${hospitalName},
+          ${hospitalSlug},
+          ${state},
+          ${lga},
+          ${address},
+          ${phone},
+          ${email}
+        )
+        returning id, name
+      ),
+      department_input as (
+        select
+          trim(value->>'name') as name,
+          (value->>'type')::facility_type as type
+        from jsonb_array_elements(${JSON.stringify(departments)}::jsonb) as value
+      ),
+      inserted_facilities as (
+        insert into facilities (hospital_id, name, type, verification_status, metadata)
+        select
+          new_hospital.id,
+          department_input.name,
+          department_input.type,
+          'pending'::facility_verification_status,
+          ${JSON.stringify(facilitiesMetadata)}::jsonb
+        from new_hospital
+        cross join department_input
+        returning id, hospital_id, name, type
+      ),
+      clinic_facility as (
+        select id, hospital_id, name
+        from inserted_facilities
+        where type = 'clinic'::facility_type
+        order by name
+        limit 1
+      ),
+      inserted_admin as (
+        insert into facility_users (facility_id, dynamic_id, role, name, email, phone)
+        select
+          clinic_facility.id,
+          ${dynamicPayload.sub},
+          'admin'::facility_user_role,
+          ${adminName},
+          ${email},
+          ${phone}
+        from clinic_facility
+        returning id, facility_id, role, name, email
+      )
+      select
+        (select id::text from new_hospital limit 1) as hospital_id,
+        (select name from new_hospital limit 1) as hospital_name,
+        (select id::text from clinic_facility limit 1) as facility_id,
+        (select name from clinic_facility limit 1) as facility_name,
+        (select id::text from inserted_admin limit 1) as user_id,
+        (select name from inserted_admin limit 1) as user_name,
+        (select email from inserted_admin limit 1) as user_email
+    `);
 
-    const [adminUser] = await db
-      .insert(facilityUsers)
-      .values({
-        facilityId: clinicFacility.id,
-        dynamicId: dynamicPayload.sub,
-        role: "admin",
-        name: adminName,
-        email: body.email || dynamicPayload.email || null,
-        phone: body.phone || null,
+    const setupRow = setupResult.rows[0] as
+      | {
+          hospital_id: string | null;
+          hospital_name: string | null;
+          facility_id: string | null;
+          facility_name: string | null;
+          user_id: string | null;
+          user_name: string | null;
+          user_email: string | null;
+        }
+      | undefined;
+
+    if (
+      !setupRow?.hospital_id ||
+      !setupRow.hospital_name ||
+      !setupRow.facility_id ||
+      !setupRow.facility_name ||
+      !setupRow.user_id ||
+      !setupRow.user_name
+    ) {
+      return NextResponse.json({ error: "Unable to set up hospital" }, { status: 500 });
+    }
+
+    const insertedFacilities = await db
+      .select({
+        id: facilities.id,
+        name: facilities.name,
+        type: facilities.type,
+        ensName: facilities.ensName,
+        verificationStatus: facilities.verificationStatus,
       })
-      .returning();
+      .from(facilities)
+      .where(eq(facilities.hospitalId, setupRow.hospital_id));
 
-    // 8. Set provider session cookie
+    for (const facility of insertedFacilities) {
+      const ensResult = await provisionFacilityENS({
+        name: facility.name,
+        type: facility.type,
+        state,
+        lga: lga ?? "",
+      });
+
+      if ("ensName" in ensResult) {
+        await db
+          .update(facilities)
+          .set({
+            ensName: ensResult.ensName,
+            verificationStatus: "provisioned",
+            verifiedAt: null,
+          })
+          .where(eq(facilities.id, facility.id));
+      }
+    }
+
+    const refreshedFacilities = await db
+      .select({
+        id: facilities.id,
+        name: facilities.name,
+        type: facilities.type,
+        ensName: facilities.ensName,
+        verificationStatus: facilities.verificationStatus,
+      })
+      .from(facilities)
+      .where(eq(facilities.hospitalId, setupRow.hospital_id));
+
     const response = NextResponse.json({
       success: true,
-      facilities: createdFacilities,
+      hospital: {
+        id: setupRow.hospital_id,
+        name: setupRow.hospital_name,
+        slug: hospitalSlug,
+      },
+      facilities: refreshedFacilities,
       adminUser: {
-        id: adminUser.id,
-        name: adminUser.name,
-        role: adminUser.role,
-        facilityId: adminUser.facilityId,
+        id: setupRow.user_id,
+        name: setupRow.user_name,
+        role: "admin",
+        facilityId: setupRow.facility_id,
       },
     });
 
     await setProviderSession(response.cookies, {
-      sub: adminUser.id,
+      sub: setupRow.user_id,
       dynamicUserId: dynamicPayload.sub,
-      facilityUserId: adminUser.id,
-      role: adminUser.role,
-      facilityId: adminUser.facilityId,
-      facilityName: clinicFacility.name,
-      name: adminUser.name,
-      email: adminUser.email,
+      facilityUserId: setupRow.user_id,
+      role: "admin",
+      hospitalId: setupRow.hospital_id,
+      hospitalName: setupRow.hospital_name,
+      facilityId: setupRow.facility_id,
+      facilityName: setupRow.facility_name,
+      name: setupRow.user_name,
+      email: setupRow.user_email,
     });
 
     return response;
   } catch (error) {
     console.error("[provider/setup-hospital]", error);
-    return NextResponse.json(
-      { error: "Unable to set up hospital" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Unable to set up hospital" }, { status: 500 });
   }
 }

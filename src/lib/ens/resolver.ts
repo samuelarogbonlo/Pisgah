@@ -23,6 +23,15 @@ const ensProfileCache = new Map<
   }
 >();
 
+export function clearEnsProfileCache(name?: string) {
+  if (!name) {
+    ensProfileCache.clear();
+    return;
+  }
+
+  ensProfileCache.delete(name.toLowerCase());
+}
+
 function getEnsClient() {
   if (ensClient) {
     return ensClient;

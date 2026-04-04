@@ -20,6 +20,11 @@ export const facilityTypeEnum = pgEnum("facility_type", [
   "pharmacy",
 ]);
 
+export const facilityVerificationStatusEnum = pgEnum(
+  "facility_verification_status",
+  ["pending", "provisioned", "verified"],
+);
+
 export const facilityUserRoleEnum = pgEnum("facility_user_role", [
   "doctor",
   "accounts",
@@ -59,13 +64,36 @@ export const prescriptionStatusEnum = pgEnum("prescription_status", [
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
 
+export const hospitals = pgTable(
+  "hospitals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    state: text("state").notNull(),
+    lga: text("lga"),
+    address: text("address"),
+    phone: text("phone"),
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    slugIdx: uniqueIndex("hospitals_slug_idx").on(table.slug),
+  }),
+);
+
 export const facilities = pgTable("facilities", {
   id: uuid("id").defaultRandom().primaryKey(),
+  hospitalId: uuid("hospital_id")
+    .notNull()
+    .references(() => hospitals.id),
   name: text("name").notNull(),
   type: facilityTypeEnum("type").notNull(),
   ensName: text("ens_name"),
   walletAddress: text("wallet_address"),
-  verificationStatus: text("verification_status").default("pending").notNull(),
+  verificationStatus: facilityVerificationStatusEnum("verification_status")
+    .default("pending")
+    .notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -98,6 +126,7 @@ export const staffInvites = pgTable(
   "staff_invites",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    token: text("token").notNull(),
     facilityId: uuid("facility_id")
       .notNull()
       .references(() => facilities.id),
@@ -113,6 +142,7 @@ export const staffInvites = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
+    tokenIdx: uniqueIndex("staff_invites_token_idx").on(table.token),
     facilityEmailIdx: uniqueIndex("staff_invites_facility_email_created_idx").on(
       table.facilityId,
       table.email,
@@ -299,7 +329,15 @@ export const workflowEvents = pgTable("workflow_events", {
 
 // ─── Relations ───────────────────────────────────────────────────────────────
 
-export const facilitiesRelations = relations(facilities, ({ many }) => ({
+export const hospitalsRelations = relations(hospitals, ({ many }) => ({
+  facilities: many(facilities),
+}));
+
+export const facilitiesRelations = relations(facilities, ({ one, many }) => ({
+  hospital: one(hospitals, {
+    fields: [facilities.hospitalId],
+    references: [hospitals.id],
+  }),
   facilityUsers: many(facilityUsers),
   staffInvites: many(staffInvites),
   patients: many(patients),
