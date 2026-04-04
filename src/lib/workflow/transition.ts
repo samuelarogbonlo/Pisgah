@@ -9,7 +9,7 @@ type DiagnosticOrder = typeof diagnosticOrders.$inferSelect;
 interface TransitionParams {
   orderId: string;
   nextStatus: OrderStatus;
-  actorId: string;
+  actorId?: string;
   actorRole: Role;
 }
 

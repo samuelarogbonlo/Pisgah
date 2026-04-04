@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { orbLegacy, type IDKitRequestConfig, IDKitRequestWidget, type IDKitResult } from "@worldcoin/idkit";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  orbLegacy,
+  type IDKitRequestConfig,
+  IDKitRequestWidget,
+  type IDKitResult,
+} from "@worldcoin/idkit";
 import { MiniKit } from "@worldcoin/minikit-js";
 import { useMiniKit } from "@worldcoin/minikit-js/minikit-provider";
 import { confirmReceipt } from "@/app/actions";
+
+type MiniKitPaymentInput = Parameters<typeof MiniKit.pay>[0];
 
 type TimelineStep = {
   label: string;
@@ -19,6 +26,16 @@ type OrderInfo = {
   timeline: TimelineStep[];
   amount: string | null;
 };
+
+type BillingInfo = {
+  id: string;
+  status: string;
+  amount: string;
+  opayEnabled: boolean;
+  worldPayEnabled: boolean;
+  latestProvider: string | null;
+  latestStatus: string | null;
+} | null;
 
 type PlanInfo = {
   summary: string;
@@ -50,6 +67,23 @@ type VerificationConfig = {
     environment: "production" | "staging";
     rpContext: IDKitRequestConfig["rp_context"];
   };
+};
+
+type WorldPrepareResponse = {
+  success?: boolean;
+  orderId: string;
+  billingId: string;
+  nairaAmount: string;
+  usdcAmount: string;
+  recipientName: string;
+  payment: {
+    reference: string;
+    to: MiniKitPaymentInput["to"];
+    tokens: MiniKitPaymentInput["tokens"];
+    description: string;
+    network: MiniKitPaymentInput["network"];
+  };
+  error?: string;
 };
 
 function Timeline({ steps }: { steps: TimelineStep[] }) {
@@ -152,14 +186,227 @@ function ConfirmReceiptButton({ orderId }: { orderId: string }) {
   );
 }
 
+function PaymentFeedback() {
+  const searchParams = useSearchParams();
+  const payment = searchParams.get("payment");
+
+  if (!payment) {
+    return null;
+  }
+
+  const isSuccess = payment === "opay_success";
+  const isPending = payment.includes("pending");
+  const message = isSuccess
+    ? "OPay checkout confirmed. Refreshing your dashboard."
+    : isPending
+      ? "Your OPay payment is still being verified."
+      : "The last OPay payment did not complete. You can try again.";
+
+  return (
+    <div
+      className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${
+        isSuccess
+          ? "border-green-200 bg-green-50 text-green-700"
+          : isPending
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-red-200 bg-red-50 text-red-700"
+      }`}
+    >
+      {message}
+    </div>
+  );
+}
+
+function AwaitingPaymentSection({
+  orderId,
+  billing,
+  isInstalled,
+}: {
+  orderId: string;
+  billing: NonNullable<BillingInfo>;
+  isInstalled: boolean;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<string | null>(null);
+
+  async function handleWorldPay() {
+    startTransition(async () => {
+      setError(null);
+
+      try {
+        const prepareResponse = await fetch("/api/payments/world/prepare", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ orderId }),
+        });
+        const prepared = (await prepareResponse.json()) as WorldPrepareResponse;
+
+        if (!prepareResponse.ok || !prepared.payment) {
+          throw new Error(prepared.error ?? "Unable to prepare World payment");
+        }
+
+        const paymentResult = await MiniKit.pay({
+          reference: prepared.payment.reference,
+          to: prepared.payment.to,
+          tokens: prepared.payment.tokens,
+          description: prepared.payment.description,
+          network: prepared.payment.network,
+          fallback: () => ({ openInWorldApp: true as const }),
+        });
+
+        if (paymentResult.executedWith === "fallback") {
+          setError("Open this payment inside World App to continue.");
+          return;
+        }
+
+        const confirmResponse = await fetch("/api/payments/world/confirm", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            orderId,
+            reference: paymentResult.data.reference,
+            transactionId: paymentResult.data.transactionId,
+          }),
+        });
+
+        const confirmed = (await confirmResponse.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+
+        if (!confirmResponse.ok) {
+          throw new Error(confirmed?.error ?? "Unable to confirm World payment");
+        }
+
+        setSubmitted("world");
+        router.refresh();
+      } catch (paymentError) {
+        setError(
+          paymentError instanceof Error
+            ? paymentError.message
+            : "World payment could not be started",
+        );
+      }
+    });
+  }
+
+  async function handleOpay() {
+    startTransition(async () => {
+      setError(null);
+
+      try {
+        const response = await fetch("/api/payments/opay/initialize", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ orderId }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | { cashierUrl?: string; error?: string }
+          | null;
+
+        if (!response.ok || !payload?.cashierUrl) {
+          throw new Error(payload?.error ?? "Unable to start OPay checkout");
+        }
+
+        setSubmitted("opay");
+        window.location.assign(payload.cashierUrl);
+      } catch (paymentError) {
+        setError(
+          paymentError instanceof Error
+            ? paymentError.message
+            : "OPay checkout could not be started",
+        );
+      }
+    });
+  }
+
+  if (submitted) {
+    return (
+      <div className="mt-3.5 rounded-lg border border-green-200 bg-green-50 p-3 text-center">
+        <p className="text-sm font-semibold text-green-700">
+          {submitted === "world"
+            ? "World payment submitted. Refreshing order..."
+            : "Redirecting to OPay checkout..."}
+        </p>
+      </div>
+    );
+  }
+
+  const latestAttempt =
+    billing.latestProvider && billing.latestStatus
+      ? `${billing.latestProvider.replace("_", " ")} · ${billing.latestStatus}`
+      : null;
+
+  return (
+    <div className="mt-3.5 rounded-lg border border-gray-200 bg-white/80 p-3">
+      <p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-gray-500">
+        <span className="inline-block h-px w-5 bg-black" />
+        Payment Required
+      </p>
+      <h4 className="mt-1.5 text-sm font-semibold">Settle this bill to continue</h4>
+      <p className="mt-2 text-lg font-semibold tracking-tight">
+        &#8358;{Number(billing.amount).toLocaleString("en-NG")}
+      </p>
+      <p className="mt-1 text-xs leading-6 text-gray-500">
+        Once a payment is verified, Pisgah will mark the bill paid and route your order to the lab automatically.
+      </p>
+      {latestAttempt && (
+        <p className="mt-2 text-[11px] text-gray-500">
+          Latest attempt: <span className="font-medium">{latestAttempt}</span>
+        </p>
+      )}
+
+      <div className="mt-3 grid gap-2">
+        {billing.worldPayEnabled && (
+          <button
+            type="button"
+            onClick={() => void handleWorldPay()}
+            disabled={isPending || !isInstalled}
+            className="inline-flex justify-center rounded-full border border-black bg-black px-3.5 py-2.5 text-[11px] uppercase tracking-[0.14em] text-white disabled:opacity-50"
+          >
+            {isPending ? "Opening..." : "Pay with World App"}
+          </button>
+        )}
+        {billing.opayEnabled && (
+          <button
+            type="button"
+            onClick={() => void handleOpay()}
+            disabled={isPending}
+            className="inline-flex justify-center rounded-full border border-black/15 bg-white px-3.5 py-2.5 text-[11px] uppercase tracking-[0.14em] text-[#161616] disabled:opacity-50"
+          >
+            {isPending ? "Preparing..." : "Pay with OPay"}
+          </button>
+        )}
+        {!billing.worldPayEnabled && !billing.opayEnabled && (
+          <p className="text-xs text-amber-700">
+            Payment is not configured for this hospital yet.
+          </p>
+        )}
+      </div>
+
+      {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 export function PatientMiniClient({
   order,
+  billing,
   plan,
   prescription,
   resultVerified,
   prescriptionVerified,
 }: {
   order: OrderInfo;
+  billing: BillingInfo;
   plan: PlanInfo;
   prescription: PrescriptionInfo;
   resultVerified: boolean;
@@ -285,6 +532,8 @@ export function PatientMiniClient({
         </div>
       )}
 
+      <PaymentFeedback />
+
       <div className="mt-4 rounded-lg border border-gray-200 bg-white/80 p-3">
         <p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-gray-500">
           <span className="inline-block h-px w-5 bg-black" />
@@ -297,7 +546,7 @@ export function PatientMiniClient({
           </span>
           {awaitingPayment && order.amount && (
             <span className="inline-block rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-amber-700">
-              ₦{order.amount} at accounts desk
+              &#8358;{Number(order.amount).toLocaleString("en-NG")}
             </span>
           )}
         </div>
@@ -313,6 +562,14 @@ export function PatientMiniClient({
 
         <Timeline steps={order.timeline} />
       </div>
+
+      {awaitingPayment && billing && (
+        <AwaitingPaymentSection
+          orderId={order.id}
+          billing={billing}
+          isInstalled={Boolean(isInstalled)}
+        />
+      )}
 
       {doctorApproved && !canRevealResult && (
         <GateCard

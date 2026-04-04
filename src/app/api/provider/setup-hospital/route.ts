@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { facilities, facilityUsers, hospitals } from "@/lib/db/schema";
+import {
+  facilities,
+  facilityUsers,
+  hospitalPaymentSettings,
+  hospitals,
+} from "@/lib/db/schema";
 import {
   extractBearerToken,
   getDynamicDisplayName,
@@ -130,6 +135,11 @@ export async function POST(request: Request) {
         )
         returning id, name
       ),
+      inserted_payment_settings as (
+        insert into hospital_payment_settings (hospital_id, opay_enabled, world_pay_enabled)
+        select id, false, false
+        from new_hospital
+      ),
       department_input as (
         select
           trim(value->>'name') as name,
@@ -241,6 +251,11 @@ export async function POST(request: Request) {
       })
       .from(facilities)
       .where(eq(facilities.hospitalId, setupRow.hospital_id));
+
+    await db
+      .insert(hospitalPaymentSettings)
+      .values({ hospitalId: setupRow.hospital_id })
+      .onConflictDoNothing();
 
     const response = NextResponse.json({
       success: true,

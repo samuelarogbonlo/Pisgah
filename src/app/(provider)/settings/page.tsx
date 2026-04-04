@@ -2,8 +2,20 @@ import { redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { requireProviderSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { facilities, facilityUsers, staffInvites, testCatalog } from "@/lib/db/schema";
-import { updateFacilityWallet, verifyFacilityEns } from "@/app/actions";
+import {
+  billingRecords,
+  diagnosticOrders,
+  facilities,
+  facilityUsers,
+  hospitalPaymentSettings,
+  staffInvites,
+  testCatalog,
+} from "@/lib/db/schema";
+import {
+  updateFacilityWallet,
+  updateHospitalPaymentSettings,
+  verifyFacilityEns,
+} from "@/app/actions";
 import { buildStaffInviteLink } from "@/lib/auth/invites";
 import { InviteStaffForm } from "../admin/staff/staff-form";
 import { SettingsClient } from "./settings-client";
@@ -49,6 +61,12 @@ export default async function SettingsPage() {
     await verifyFacilityEns(formData);
   }
 
+  async function savePaymentSettingsAction(formData: FormData) {
+    "use server";
+
+    await updateHospitalPaymentSettings(formData);
+  }
+
   const hospitalFacilities = await db
     .select({
       id: facilities.id,
@@ -61,6 +79,49 @@ export default async function SettingsPage() {
     .from(facilities)
     .where(eq(facilities.hospitalId, session.hospitalId))
     .orderBy(facilities.name);
+
+  const paymentLedger = await db
+    .select({
+      amount: billingRecords.amount,
+      status: billingRecords.status,
+      confirmedAt: billingRecords.confirmedAt,
+      facilityName: facilities.name,
+      facilityType: facilities.type,
+      walletAddress: facilities.walletAddress,
+      ensName: facilities.ensName,
+      verificationStatus: facilities.verificationStatus,
+    })
+    .from(billingRecords)
+    .innerJoin(diagnosticOrders, eq(billingRecords.orderId, diagnosticOrders.id))
+    .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
+    .where(eq(facilities.hospitalId, session.hospitalId))
+    .orderBy(desc(billingRecords.createdAt));
+
+  const openInvoices = paymentLedger.filter((row) => row.status === "unpaid");
+  const confirmedInvoices = paymentLedger.filter((row) =>
+    row.status === "cash_confirmed" || row.status === "online_confirmed",
+  );
+  const totalOpen = openInvoices.reduce(
+    (sum, row) => sum + Number(row.amount || 0),
+    0,
+  );
+  const totalConfirmed = confirmedInvoices.reduce(
+    (sum, row) => sum + Number(row.amount || 0),
+    0,
+  );
+
+  const [paymentSettings] = await db
+    .select({
+      opayEnabled: hospitalPaymentSettings.opayEnabled,
+      opayMerchantId: hospitalPaymentSettings.opayMerchantId,
+      worldPayEnabled: hospitalPaymentSettings.worldPayEnabled,
+    })
+    .from(hospitalPaymentSettings)
+    .where(eq(hospitalPaymentSettings.hospitalId, session.hospitalId))
+    .limit(1);
+
+  const worldRecipientAddress =
+    process.env.WORLD_PAYMENT_RECIPIENT_ADDRESS?.trim() || null;
 
   // Query test catalog for the clinic
   const tests = await db
@@ -174,6 +235,169 @@ export default async function SettingsPage() {
                       </button>
                     </form>
                   </div>
+                </div>
+              </div>
+            );
+          })}
+          {hospitalFacilities.length === 0 && (
+            <div className="rounded-md border border-dashed border-[#d8d8d2] px-4 py-6 text-sm text-[#6d6d6d]">
+              No facilities are linked to this hospital yet.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#d8d8d2] bg-white p-5">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#6d6d6d]">
+          Payment Configuration
+        </h2>
+        <p className="mt-2 text-sm text-[#6d6d6d]">
+          Control which patient-side payment rails are exposed in the Pisgah Mini
+          App. OPay uses the hospital merchant ID saved here. World App pay uses
+          the server wallet configured for this deployment.
+        </p>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-md border border-[#d8d8d2] px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+              Open invoices
+            </p>
+            <p className="mt-2 text-2xl tracking-tight">{openInvoices.length}</p>
+          </div>
+          <div className="rounded-md border border-[#d8d8d2] px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+              Confirmed
+            </p>
+            <p className="mt-2 text-2xl tracking-tight">
+              {confirmedInvoices.length}
+            </p>
+          </div>
+          <div className="rounded-md border border-[#d8d8d2] px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+              Tracked value
+            </p>
+            <p className="mt-2 text-2xl tracking-tight">
+              &#8358;{(totalOpen + totalConfirmed).toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <form action={savePaymentSettingsAction} className="mt-5 rounded-md border border-[#d8d8d2] p-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-md border border-[#d8d8d2] px-3 py-3">
+              <input
+                type="checkbox"
+                name="opayEnabled"
+                defaultChecked={paymentSettings?.opayEnabled ?? false}
+                className="mt-1 h-4 w-4 rounded border-black/20"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Enable OPay checkout</span>
+                <span className="mt-1 block text-xs text-[#6d6d6d]">
+                  Patients paying online from the Mini App will be redirected to
+                  OPay hosted checkout for this hospital.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-3 rounded-md border border-[#d8d8d2] px-3 py-3">
+              <input
+                type="checkbox"
+                name="worldPayEnabled"
+                defaultChecked={paymentSettings?.worldPayEnabled ?? false}
+                className="mt-1 h-4 w-4 rounded border-black/20"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Enable World App pay</span>
+                <span className="mt-1 block text-xs text-[#6d6d6d]">
+                  Charges are routed to the platform settlement wallet configured
+                  on this deployment.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                OPay Merchant ID
+              </span>
+              <input
+                name="opayMerchantId"
+                defaultValue={paymentSettings?.opayMerchantId ?? ""}
+                placeholder="256620120000073887"
+                className="mt-2 w-full rounded-[8px] border border-black/10 bg-white px-3 py-2.5 text-sm outline-none focus:border-black"
+              />
+            </label>
+
+            <div className="rounded-md border border-[#d8d8d2] bg-[#fafaf8] px-3 py-3">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                World settlement wallet
+              </p>
+              <p className="mt-2 break-all font-mono text-xs text-[#161616]">
+                {worldRecipientAddress ?? "WORLD_PAYMENT_RECIPIENT_ADDRESS is missing"}
+              </p>
+              <p className="mt-2 text-[11px] text-[#6d6d6d]">
+                This is deployment-wide for now. The hospital toggle above only
+                controls whether World App pay is shown to patients.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-[#6d6d6d]">
+              Accounts no longer confirms payments manually. Verified provider
+              callbacks move orders into the lab automatically.
+            </p>
+            <button
+              type="submit"
+              className="rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.14em] text-white"
+            >
+              Save Payment Settings
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-4 space-y-3">
+          {hospitalFacilities.map((facility) => {
+            const trackedInvoiceCount = paymentLedger.filter(
+              (row) => row.facilityName === facility.name,
+            ).length;
+            const facilityOpen = paymentLedger.filter(
+              (row) =>
+                row.facilityName === facility.name && row.status === "unpaid",
+            ).length;
+
+            return (
+              <div
+                key={facility.id}
+                className="rounded-md border border-[#d8d8d2] px-4 py-3 flex flex-wrap items-start justify-between gap-3"
+              >
+                <div>
+                  <p className="text-sm font-semibold">{facility.name}</p>
+                  <p className="mt-1 font-mono text-xs text-[#6d6d6d]">
+                    {facility.ensName ?? "ENS not provisioned"}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-xs text-[#6d6d6d]">
+                    {facility.walletAddress ?? "No facility wallet saved yet"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                    {facility.type}
+                  </span>
+                  <span className="rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                    {trackedInvoiceCount} tracked
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${
+                      facilityOpen > 0
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-green-50 text-green-700"
+                    }`}
+                  >
+                    {facilityOpen > 0 ? `${facilityOpen} open` : "settled"}
+                  </span>
                 </div>
               </div>
             );

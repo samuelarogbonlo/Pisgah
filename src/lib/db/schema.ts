@@ -54,6 +54,16 @@ export const billingStatusEnum = pgEnum("billing_status", [
   "failed",
 ]);
 
+export const paymentProviderEnum = pgEnum("payment_provider", [
+  "opay",
+  "world",
+]);
+
+export const paymentTransactionStatusEnum = pgEnum(
+  "payment_transaction_status",
+  ["initialized", "pending", "paid", "failed", "cancelled", "expired"],
+);
+
 export const prescriptionStatusEnum = pgEnum("prescription_status", [
   "issued",
   "sent_to_pharmacy",
@@ -98,6 +108,21 @@ export const facilities = pgTable("facilities", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+export const hospitalPaymentSettings = pgTable(
+  "hospital_payment_settings",
+  {
+    hospitalId: uuid("hospital_id")
+      .primaryKey()
+      .notNull()
+      .references(() => hospitals.id),
+    opayEnabled: boolean("opay_enabled").default(false).notNull(),
+    opayMerchantId: text("opay_merchant_id"),
+    worldPayEnabled: boolean("world_pay_enabled").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+);
 
 export const testCatalog = pgTable("test_catalog", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -223,6 +248,43 @@ export const billingRecords = pgTable("billing_records", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const paymentTransactions = pgTable(
+  "payment_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    hospitalId: uuid("hospital_id")
+      .notNull()
+      .references(() => hospitals.id),
+    billingRecordId: uuid("billing_record_id")
+      .notNull()
+      .references(() => billingRecords.id),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => diagnosticOrders.id),
+    provider: paymentProviderEnum("provider").notNull(),
+    providerReference: text("provider_reference").notNull(),
+    providerPaymentId: text("provider_payment_id"),
+    amount: numeric("amount").notNull(),
+    currency: text("currency").default("NGN").notNull(),
+    status: paymentTransactionStatusEnum("status").default("initialized").notNull(),
+    payerWallet: text("payer_wallet"),
+    checkoutUrl: text("checkout_url"),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    failureReason: text("failure_reason"),
+    providerPayload: jsonb("provider_payload"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    providerReferenceIdx: uniqueIndex(
+      "payment_transactions_provider_reference_idx",
+    ).on(table.provider, table.providerReference),
+    providerPaymentIdIdx: uniqueIndex(
+      "payment_transactions_provider_payment_id_idx",
+    ).on(table.provider, table.providerPaymentId),
+  }),
+);
+
 export const labResults = pgTable("lab_results", {
   id: uuid("id").defaultRandom().primaryKey(),
   orderId: uuid("order_id")
@@ -330,8 +392,13 @@ export const workflowEvents = pgTable("workflow_events", {
 
 // ─── Relations ───────────────────────────────────────────────────────────────
 
-export const hospitalsRelations = relations(hospitals, ({ many }) => ({
+export const hospitalsRelations = relations(hospitals, ({ one, many }) => ({
   facilities: many(facilities),
+  paymentSettings: one(hospitalPaymentSettings, {
+    fields: [hospitals.id],
+    references: [hospitalPaymentSettings.hospitalId],
+  }),
+  paymentTransactions: many(paymentTransactions),
 }));
 
 export const facilitiesRelations = relations(facilities, ({ one, many }) => ({
@@ -354,6 +421,16 @@ export const testCatalogRelations = relations(testCatalog, ({ one }) => ({
     references: [facilities.id],
   }),
 }));
+
+export const hospitalPaymentSettingsRelations = relations(
+  hospitalPaymentSettings,
+  ({ one }) => ({
+    hospital: one(hospitals, {
+      fields: [hospitalPaymentSettings.hospitalId],
+      references: [hospitals.id],
+    }),
+  }),
+);
 
 export const facilityUsersRelations = relations(
   facilityUsers,
@@ -442,6 +519,7 @@ export const diagnosticOrdersRelations = relations(
       relationName: "orderLab",
     }),
     billingRecords: many(billingRecords),
+    paymentTransactions: many(paymentTransactions),
     labResult: one(labResults),
     aiDrafts: many(aiDrafts),
     actionPlan: one(actionPlans),
@@ -450,16 +528,38 @@ export const diagnosticOrdersRelations = relations(
   })
 );
 
-export const billingRecordsRelations = relations(billingRecords, ({ one }) => ({
-  order: one(diagnosticOrders, {
-    fields: [billingRecords.orderId],
-    references: [diagnosticOrders.id],
+export const billingRecordsRelations = relations(
+  billingRecords,
+  ({ one, many }) => ({
+    order: one(diagnosticOrders, {
+      fields: [billingRecords.orderId],
+      references: [diagnosticOrders.id],
+    }),
+    confirmedByUser: one(facilityUsers, {
+      fields: [billingRecords.confirmedBy],
+      references: [facilityUsers.id],
+    }),
+    paymentTransactions: many(paymentTransactions),
   }),
-  confirmedByUser: one(facilityUsers, {
-    fields: [billingRecords.confirmedBy],
-    references: [facilityUsers.id],
+);
+
+export const paymentTransactionsRelations = relations(
+  paymentTransactions,
+  ({ one }) => ({
+    hospital: one(hospitals, {
+      fields: [paymentTransactions.hospitalId],
+      references: [hospitals.id],
+    }),
+    billingRecord: one(billingRecords, {
+      fields: [paymentTransactions.billingRecordId],
+      references: [billingRecords.id],
+    }),
+    order: one(diagnosticOrders, {
+      fields: [paymentTransactions.orderId],
+      references: [diagnosticOrders.id],
+    }),
   }),
-}));
+);
 
 export const labResultsRelations = relations(
   labResults,
@@ -530,3 +630,14 @@ export const workflowEventsRelations = relations(
     }),
   })
 );
+
+export type HospitalPaymentSettings =
+  typeof hospitalPaymentSettings.$inferSelect;
+export type NewHospitalPaymentSettings =
+  typeof hospitalPaymentSettings.$inferInsert;
+export type PaymentProvider = (typeof paymentProviderEnum.enumValues)[number];
+export type PaymentTransactionStatus =
+  (typeof paymentTransactionStatusEnum.enumValues)[number];
+
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+export type NewPaymentTransaction = typeof paymentTransactions.$inferInsert;

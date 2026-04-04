@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import {
   diagnosticOrders,
   billingRecords,
+  hospitalPaymentSettings,
   labResults,
   actionPlans,
   prescriptions,
@@ -957,6 +958,49 @@ export async function promoteToAdmin(targetUserId: string) {
 
   revalidatePath("/settings");
   revalidatePath("/admin/staff");
+
+  return { success: true };
+}
+
+export async function updateHospitalPaymentSettings(formData: FormData) {
+  const actor = await requireProviderSession(["admin"]);
+  const opayEnabled = formData.get("opayEnabled") === "on";
+  const worldPayEnabled = formData.get("worldPayEnabled") === "on";
+  const opayMerchantId = (formData.get("opayMerchantId") as string | null)?.trim() || null;
+
+  if (opayEnabled && !opayMerchantId) {
+    return { success: false, error: "OPay merchant ID is required when OPay is enabled" };
+  }
+
+  if (worldPayEnabled && !process.env.WORLD_PAYMENT_RECIPIENT_ADDRESS?.trim()) {
+    return {
+      success: false,
+      error: "WORLD_PAYMENT_RECIPIENT_ADDRESS is not configured on the server",
+    };
+  }
+
+  await db
+    .insert(hospitalPaymentSettings)
+    .values({
+      hospitalId: actor.hospitalId,
+      opayEnabled,
+      opayMerchantId,
+      worldPayEnabled,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: hospitalPaymentSettings.hospitalId,
+      set: {
+        opayEnabled,
+        opayMerchantId,
+        worldPayEnabled,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath("/settings");
+  revalidatePath("/accounts");
+  revalidatePath("/mini");
 
   return { success: true };
 }
