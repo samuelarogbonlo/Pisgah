@@ -7,7 +7,7 @@ import {
   patients,
   prescriptions,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { OrderTable } from "./order-table";
 import { requireProviderSession } from "@/lib/auth/session";
 
@@ -197,10 +197,16 @@ export default async function DashboardPage() {
     (row) => row.orderStatus === "COMPLETED" && isSameDay(row.updatedAt, today)
   ).length;
 
-  const billedToday = billingRows.reduce((sum, billing) => {
-    if (!isSameDay(billing.createdAt, today)) return sum;
-    return sum + Number(billing.amount ?? 0);
-  }, 0);
+  const hospitalFacilityIds = db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId));
+  const [patientCountResult] = await db
+    .select({ count: sql<number>`cast(count(*) as int)` })
+    .from(patients)
+    .where(
+      isAdmin
+        ? inArray(patients.facilityId, hospitalFacilityIds)
+        : eq(patients.facilityId, session.facilityId)
+    );
+  const totalPatients = patientCountResult?.count ?? 0;
 
   return (
     <div>
@@ -237,6 +243,14 @@ export default async function DashboardPage() {
           </strong>
           <span className="mt-2 block text-[14px] text-[#5f5f5b]">
             Completed Today
+          </span>
+        </div>
+        <div className="rounded-[8px] border border-[#d8d8d2] bg-white px-6 py-5 shadow-[0_18px_46px_rgba(0,0,0,0.08)]">
+          <strong className="block text-[2.2rem] leading-none tracking-[-0.05em]">
+            {totalPatients}
+          </strong>
+          <span className="mt-2 block text-[14px] text-[#5f5f5b]">
+            Total Patients
           </span>
         </div>
       </div>
