@@ -27,8 +27,7 @@ export function InviteStaffForm({
       }
 
       setSuccess({
-        message:
-          "Hospital staff invite created. Share the invite link so the user lands in the correct hospital and facility.",
+        message: "Invite sent! The staff member will receive an email with their invite link.",
         inviteLink: "inviteLink" in result ? result.inviteLink ?? null : null,
       });
     });

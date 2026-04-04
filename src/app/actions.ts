@@ -16,6 +16,7 @@ import {
   facilities,
   staffInvites,
   facilityUsers,
+  testCatalog,
 } from "@/lib/db/schema";
 import { canTransition, type OrderStatus } from "@/lib/workflow/machine";
 import { transitionOrder } from "@/lib/workflow/transition";
@@ -606,11 +607,29 @@ export async function inviteStaff(formData: FormData) {
     expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
   });
 
-  revalidatePath("/admin/staff");
+  const inviteLink = buildStaffInviteLink(token);
+
+  // Send invite email (non-blocking — invite exists even if email fails)
+  try {
+    const { sendStaffInviteEmail } = await import("@/lib/email/send-invite");
+    await sendStaffInviteEmail({
+      to: email,
+      staffName: name,
+      role,
+      facilityName: facility.name,
+      hospitalName: actor.hospitalName,
+      inviteLink,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+    });
+  } catch (emailError) {
+    console.error("[inviteStaff] Email send failed:", emailError);
+  }
+
+  revalidatePath("/settings");
 
   return {
     success: true,
-    inviteLink: buildStaffInviteLink(token),
+    inviteLink,
     facilityName: facility.name,
   };
 }

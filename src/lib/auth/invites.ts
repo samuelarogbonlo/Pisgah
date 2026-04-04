@@ -6,5 +6,5 @@ export function generateStaffInviteToken() {
 
 export function buildStaffInviteLink(token: string) {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
-  return `${baseUrl.replace(/\/$/, "")}/login?invite=${encodeURIComponent(token)}`;
+  return `${baseUrl.replace(/\/$/, "")}/invite/${encodeURIComponent(token)}`;
 }
