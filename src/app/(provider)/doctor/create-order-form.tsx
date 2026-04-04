@@ -16,11 +16,19 @@ interface CatalogItem {
 interface CreateOrderFormProps {
   patients: Patient[];
   catalog: CatalogItem[];
+  labName: string;
+  labEns: string | null;
 }
 
-export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
+export function CreateOrderForm({
+  patients,
+  catalog,
+  labName,
+  labEns,
+}: CreateOrderFormProps) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  const [claimLink, setClaimLink] = useState<string | null>(null);
   const [isNewPatient, setIsNewPatient] = useState(false);
   const [selectedTest, setSelectedTest] = useState(catalog[0]?.testName ?? "");
   const [amount, setAmount] = useState(catalog[0]?.price ?? "0");
@@ -35,6 +43,7 @@ export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
 
   function handleSubmit(formData: FormData) {
     setMessage(null);
+    setClaimLink(null);
     startTransition(async () => {
       const action = isNewPatient ? createOrderWithNewPatient : createOrder;
       const result = await action(formData);
@@ -42,6 +51,7 @@ export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
         setMessage(`Error: ${result.error}`);
       } else {
         setMessage("Order created successfully");
+        setClaimLink("claimLink" in result ? result.claimLink ?? null : null);
         setTimeout(() => setMessage(null), 3000);
       }
     });
@@ -171,12 +181,14 @@ export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
           </label>
           <input
             className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-100 text-sm text-gray-500 cursor-default"
-            value="Sunshine Diagnostics Lab"
+            value={labName}
             readOnly
           />
-          <span className="block mt-1.5 font-mono text-xs text-gray-400">
-            sunshinelab.pisgah.eth
-          </span>
+          {labEns && (
+            <span className="block mt-1.5 font-mono text-xs text-gray-400">
+              {labEns}
+            </span>
+          )}
         </div>
 
         <div>
@@ -214,6 +226,14 @@ export function CreateOrderForm({ patients, catalog }: CreateOrderFormProps) {
           </span>
         )}
       </div>
+      {claimLink && (
+        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/80 p-3">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500">
+            Patient claim link
+          </p>
+          <p className="mt-2 break-all text-sm text-gray-700">{claimLink}</p>
+        </div>
+      )}
     </form>
   );
 }

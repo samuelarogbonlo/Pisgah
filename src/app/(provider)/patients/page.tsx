@@ -3,8 +3,10 @@ import { patients, diagnosticOrders } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { PatientSearch } from "./patient-search";
 import { RegisterToggle } from "./register-toggle";
+import { requireProviderSession } from "@/lib/auth/session";
 
 export default async function PatientsPage() {
+  const session = await requireProviderSession(["doctor", "admin"]);
   const patientRows = await db
     .select({
       id: patients.id,
@@ -15,6 +17,7 @@ export default async function PatientsPage() {
     })
     .from(patients)
     .leftJoin(diagnosticOrders, eq(patients.id, diagnosticOrders.patientId))
+    .where(eq(patients.facilityId, session.facilityId))
     .groupBy(patients.id, patients.name, patients.phone, patients.createdAt)
     .orderBy(sql`${patients.createdAt} desc`);
 

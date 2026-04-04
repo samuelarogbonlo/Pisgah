@@ -7,10 +7,10 @@ import {
 } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { LabActions } from "./lab-actions";
-
-const SUNSHINE_LAB_ID = "a1b2c3d4-0002-4000-8000-000000000002";
+import { requireProviderSession } from "@/lib/auth/session";
 
 export default async function LabPage() {
+  const session = await requireProviderSession(["lab_tech", "admin"]);
   const incomingOrders = await db
     .select({
       id: diagnosticOrders.id,
@@ -25,7 +25,7 @@ export default async function LabPage() {
     .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
     .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .leftJoin(labResults, eq(labResults.orderId, diagnosticOrders.id))
-    .where(eq(diagnosticOrders.labId, SUNSHINE_LAB_ID))
+    .where(eq(diagnosticOrders.labId, session.facilityId))
     .orderBy(sql`${diagnosticOrders.createdAt} desc`);
 
   // Filter to show relevant orders (routed, sample collected, and recently uploaded)
@@ -55,10 +55,10 @@ export default async function LabPage() {
           Lab Dashboard
         </p>
         <h2 className="text-3xl tracking-tight leading-none mt-3">
-          Sunshine Diagnostics
+          {session.facilityName}
         </h2>
         <p className="mt-1 font-mono text-xs text-gray-400">
-          sunshinelab.pisgah.eth
+          {session.facilityName}
         </p>
       </div>
 

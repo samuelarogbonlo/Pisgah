@@ -1,13 +1,14 @@
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  diagnosticOrders,
-  patients,
   actionPlans,
-  prescriptions,
-  workflowEvents,
+  diagnosticOrders,
   facilities,
+  patientClaims,
+  prescriptions,
+  worldIdVerifications,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { getPatientSession } from "@/lib/auth/session";
 import { PatientMiniClient } from "./patient-mini-client";
 
 const ORDER_PIPELINE = [
@@ -24,40 +25,74 @@ const ORDER_PIPELINE = [
 ] as const;
 
 const STATUS_INDEX: Record<string, number> = {};
-ORDER_PIPELINE.forEach((s, i) => {
-  STATUS_INDEX[s.status] = i;
+ORDER_PIPELINE.forEach((step, index) => {
+  STATUS_INDEX[step.status] = index;
 });
 
+function MiniInstruction() {
+  return (
+    <div className="px-6 py-8">
+      <p className="text-[10px] uppercase tracking-[0.24em] text-[#6d6d6d]">
+        Pisgah Mini App
+      </p>
+      <h1 className="mt-4 text-3xl font-semibold tracking-tight text-[#161616]">
+        Open your claim link in World App
+      </h1>
+      <p className="mt-4 text-sm leading-7 text-[#6d6d6d]">
+        Your clinic sends a secure Pisgah link after the doctor creates your
+        case. Open that link on your phone in World App to continue.
+      </p>
+    </div>
+  );
+}
+
 export default async function PatientMiniPage() {
-  // Fetch the demo patient's latest order
-  const demoOrders = await db
-    .select({
-      id: diagnosticOrders.id,
-      testType: diagnosticOrders.testType,
-      status: diagnosticOrders.status,
-      totalAmount: diagnosticOrders.totalAmount,
-      patientName: patients.name,
-    })
-    .from(diagnosticOrders)
-    .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-    .orderBy(sql`${diagnosticOrders.createdAt} desc`)
-    .limit(1);
+  const patientSession = await getPatientSession();
 
-  const order = demoOrders[0];
-
-  if (!order) {
-    return (
-      <div className="flex justify-center pt-5">
-        <div className="border border-gray-200 rounded-lg bg-white/90 p-3.5 inline-block">
-          <p className="text-sm text-gray-400">No orders found.</p>
-        </div>
-      </div>
-    );
+  if (!patientSession) {
+    return <MiniInstruction />;
   }
 
-  // Get action plan if exists
-  let plan: { summary: string; recommendations: string } | null = null;
-  const plans = await db
+  const [claim] = await db
+    .select({
+      id: patientClaims.id,
+      orderId: patientClaims.orderId,
+      patientId: patientClaims.patientId,
+    })
+    .from(patientClaims)
+    .where(
+      and(
+        eq(patientClaims.id, patientSession.claimId),
+        eq(patientClaims.patientId, patientSession.patientId),
+      ),
+    )
+    .limit(1);
+
+  if (!claim?.orderId) {
+    return <MiniInstruction />;
+  }
+
+  const [order] = await db
+    .select({
+      id: diagnosticOrders.id,
+      status: diagnosticOrders.status,
+      testType: diagnosticOrders.testType,
+      totalAmount: diagnosticOrders.totalAmount,
+    })
+    .from(diagnosticOrders)
+    .where(
+      and(
+        eq(diagnosticOrders.id, claim.orderId),
+        eq(diagnosticOrders.patientId, patientSession.patientId),
+      ),
+    )
+    .limit(1);
+
+  if (!order) {
+    return <MiniInstruction />;
+  }
+
+  const [plan] = await db
     .select({
       summary: actionPlans.summary,
       recommendations: actionPlans.recommendations,
@@ -65,105 +100,88 @@ export default async function PatientMiniPage() {
     .from(actionPlans)
     .where(eq(actionPlans.orderId, order.id))
     .limit(1);
-  if (plans.length > 0) {
-    plan = plans[0];
-  }
 
-  // Get prescription if exists
-  let rxData: {
-    items: Array<{ drugName?: string; dosage?: string; quantity?: string; instructions?: string }>;
-    pharmacyEns: string | null;
-    redemptionCode: string | null;
-    status: string;
-  } | null = null;
-  const rxRows = await db
+  const [prescription] = await db
     .select({
+      id: prescriptions.id,
       items: prescriptions.items,
-      pharmacyId: prescriptions.pharmacyId,
-      redemptionCode: prescriptions.redemptionCode,
       status: prescriptions.status,
+      redemptionCode: prescriptions.redemptionCode,
+      pharmacyName: facilities.name,
+      pharmacyEns: facilities.ensName,
     })
     .from(prescriptions)
+    .leftJoin(facilities, eq(prescriptions.pharmacyId, facilities.id))
     .where(eq(prescriptions.orderId, order.id))
     .limit(1);
 
-  if (rxRows.length > 0) {
-    let pharmacyEns: string | null = null;
-    if (rxRows[0].pharmacyId) {
-      const pharm = await db
-        .select({ ensName: facilities.ensName })
-        .from(facilities)
-        .where(eq(facilities.id, rxRows[0].pharmacyId))
-        .limit(1);
-      pharmacyEns = pharm[0]?.ensName ?? null;
-    }
-    rxData = {
-      items: rxRows[0].items as typeof rxData extends null ? never : NonNullable<typeof rxData>["items"],
-      pharmacyEns,
-      redemptionCode: rxRows[0].redemptionCode ?? null,
-      status: rxRows[0].status,
-    };
-  }
+  const [resultVerification] = await db
+    .select({ id: worldIdVerifications.id })
+    .from(worldIdVerifications)
+    .where(
+      and(
+        eq(worldIdVerifications.patientId, patientSession.patientId),
+        eq(worldIdVerifications.action, "view-result"),
+        eq(worldIdVerifications.orderId, order.id),
+      ),
+    )
+    .limit(1);
 
-  // Build timeline
+  const [prescriptionVerification] =
+    prescription?.id
+      ? await db
+          .select({ id: worldIdVerifications.id })
+          .from(worldIdVerifications)
+          .where(
+            and(
+              eq(worldIdVerifications.patientId, patientSession.patientId),
+              eq(worldIdVerifications.action, "redeem-prescription"),
+              eq(worldIdVerifications.prescriptionId, prescription.id),
+            ),
+          )
+          .limit(1)
+      : [];
+
   const currentIdx = STATUS_INDEX[order.status] ?? 0;
-  const timeline = ORDER_PIPELINE.map((step, i) => ({
+  const timeline = ORDER_PIPELINE.map((step, index) => ({
     label: step.label,
     state:
-      i < currentIdx ? ("done" as const) : i === currentIdx ? ("current" as const) : ("pending" as const),
+      index < currentIdx
+        ? ("done" as const)
+        : index === currentIdx
+          ? ("current" as const)
+          : ("pending" as const),
   }));
 
-  // Compute display status
-  const currentStep = ORDER_PIPELINE[currentIdx];
-  const displayStatus = currentStep?.label ?? order.status;
-
   return (
-    <div className="flex justify-center pt-5">
-      <div className="border border-gray-200 rounded-lg bg-white/90 p-3.5 inline-block">
-        <div className="px-1.5 pb-4">
-          <p className="text-[10px] tracking-[0.22em] uppercase text-gray-500 flex items-center gap-2">
-            <span className="inline-block w-5 h-px bg-black" />
-            Patient Mini App
-          </p>
-          <h3 className="text-xl tracking-tight mt-3">
-            Verified release surface
-          </h3>
-        </div>
-
-        <div className="max-w-[310px] p-3 rounded-[34px] border border-black/10 bg-gray-900 shadow-lg">
-          <div className="w-[120px] h-[5px] mx-auto mt-0.5 mb-4 rounded-full bg-white/20" />
-          <div
-            className="px-4 pt-4 pb-6 min-h-[540px] rounded-3xl"
-            style={{
-              background:
-                "radial-gradient(circle at top, rgba(0,0,0,0.06), transparent 26%), linear-gradient(180deg, #fff 0%, #f5f5f5 100%)",
-            }}
-          >
-            {/* Phone Header */}
-            <div className="text-center mb-5 pb-3.5 border-b border-gray-200">
-              <strong className="block text-[15px] tracking-wide uppercase">
-                Pisgah
-              </strong>
-              <span className="text-xs text-gray-500">
-                {order.patientName}
-              </span>
-            </div>
-
-            <PatientMiniClient
-              order={{
-                testType: order.testType,
-                displayStatus,
-                timeline,
-              }}
-              plan={plan}
-              prescription={rxData}
-              orderId={order.id}
-              amount={order.totalAmount ?? null}
-              redemptionCode={rxData?.redemptionCode ?? null}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+    <PatientMiniClient
+      order={{
+        id: order.id,
+        testType: order.testType,
+        displayStatus: ORDER_PIPELINE[currentIdx]?.label ?? order.status,
+        timeline,
+        amount: order.totalAmount ?? null,
+      }}
+      plan={plan ?? null}
+      prescription={
+        prescription
+          ? {
+              id: prescription.id,
+              items: prescription.items as Array<{
+                drugName?: string;
+                dosage?: string;
+                quantity?: string;
+                instructions?: string;
+              }>,
+              pharmacyName: prescription.pharmacyName ?? "Partner Pharmacy",
+              pharmacyEns: prescription.pharmacyEns ?? null,
+              redemptionCode: prescription.redemptionCode ?? null,
+              status: prescription.status,
+            }
+          : null
+      }
+      resultVerified={Boolean(resultVerification)}
+      prescriptionVerified={Boolean(prescriptionVerification)}
+    />
   );
 }

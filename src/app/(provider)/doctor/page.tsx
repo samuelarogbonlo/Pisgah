@@ -2,8 +2,7 @@ import { db } from "@/lib/db";
 import { diagnosticOrders, patients, facilities, testCatalog } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { CreateOrderForm } from "./create-order-form";
-
-const ST_LUKES_ID = "a1b2c3d4-0001-4000-8000-000000000001";
+import { requireProviderSession } from "@/lib/auth/session";
 
 function formatStatus(status: string): string {
   return status
@@ -23,31 +22,46 @@ function statusBadgeClass(status: string): string {
 }
 
 export default async function DoctorPage() {
-  const doctorId = "a1b2c3d4-0011-4000-8000-000000000011";
+  const session = await requireProviderSession(["doctor", "admin"]);
+  const isAdmin = session.role === "admin";
 
-  const [allPatients, catalog, activeOrders] = await Promise.all([
+  const [allPatients, catalog, activeOrders, lab] = await Promise.all([
     db
       .select({ id: patients.id, name: patients.name })
       .from(patients)
+      .where(eq(patients.facilityId, session.facilityId))
       .orderBy(patients.name),
     db
       .select({ testName: testCatalog.testName, price: testCatalog.price })
       .from(testCatalog)
-      .where(eq(testCatalog.facilityId, ST_LUKES_ID))
+      .where(eq(testCatalog.facilityId, session.facilityId))
       .orderBy(testCatalog.testName),
+    (() => {
+      const query = db
+        .select({
+          id: diagnosticOrders.id,
+          testType: diagnosticOrders.testType,
+          status: diagnosticOrders.status,
+          patientName: patients.name,
+          labEns: facilities.ensName,
+        })
+        .from(diagnosticOrders)
+        .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+        .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
+        .orderBy(sql`${diagnosticOrders.createdAt} desc`);
+
+      if (isAdmin) {
+        return query.where(eq(diagnosticOrders.facilityId, session.facilityId));
+      }
+
+      return query.where(eq(diagnosticOrders.doctorId, session.facilityUserId));
+    })(),
     db
-      .select({
-        id: diagnosticOrders.id,
-        testType: diagnosticOrders.testType,
-        status: diagnosticOrders.status,
-        patientName: patients.name,
-        labEns: facilities.ensName,
-      })
-      .from(diagnosticOrders)
-      .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-      .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
-      .where(eq(diagnosticOrders.doctorId, doctorId))
-      .orderBy(sql`${diagnosticOrders.createdAt} desc`),
+      .select({ name: facilities.name, ensName: facilities.ensName })
+      .from(facilities)
+      .where(eq(facilities.type, "lab"))
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
   ]);
 
   return (
@@ -58,7 +72,7 @@ export default async function DoctorPage() {
           Doctor Workspace
         </p>
         <h2 className="text-3xl tracking-tight leading-none mt-3">
-          Dr. Adeyemi
+          {session.name}
         </h2>
       </div>
 
@@ -67,10 +81,15 @@ export default async function DoctorPage() {
           Create Order
         </h3>
         <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-gray-50 border border-gray-200 mb-3 text-[13px] text-gray-500">
-          Creating as <strong className="text-black">&nbsp;Dr. Adeyemi&nbsp;</strong>
-          &middot; St. Luke&apos;s Clinic
+          Creating as <strong className="text-black">&nbsp;{session.name}&nbsp;</strong>
+          &middot; {session.facilityName}
         </div>
-        <CreateOrderForm patients={allPatients} catalog={catalog} />
+        <CreateOrderForm
+          patients={allPatients}
+          catalog={catalog}
+          labName={lab?.name ?? "No lab configured"}
+          labEns={lab?.ensName ?? null}
+        />
       </div>
 
       <div className="border border-gray-200 rounded-md bg-white p-4">

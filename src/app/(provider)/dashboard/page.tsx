@@ -3,11 +3,13 @@ import {
   billingRecords,
   diagnosticOrders,
   facilityUsers,
+  facilities,
   patients,
   prescriptions,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { OrderTable } from "./order-table";
+import { requireProviderSession } from "@/lib/auth/session";
 
 type OrderStatus = typeof diagnosticOrders.$inferSelect["status"];
 type PrescriptionStatus = typeof prescriptions.$inferSelect["status"];
@@ -111,28 +113,54 @@ function displayStatusLabel(
 }
 
 export default async function DashboardPage() {
+  const session = await requireProviderSession();
+  const isAdmin = session.role === "admin";
+
   const [orders, billingRows] = await Promise.all([
-    db
-      .select({
-        id: diagnosticOrders.id,
-        patientName: patients.name,
-        testType: diagnosticOrders.testType,
-        doctorName: facilityUsers.name,
-        orderStatus: diagnosticOrders.status,
-        createdAt: diagnosticOrders.createdAt,
-        updatedAt: diagnosticOrders.updatedAt,
-        prescriptionStatus: prescriptions.status,
-      })
-      .from(diagnosticOrders)
-      .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-      .innerJoin(facilityUsers, eq(diagnosticOrders.doctorId, facilityUsers.id))
-      .leftJoin(prescriptions, eq(prescriptions.orderId, diagnosticOrders.id)),
-    db
-      .select({
-        amount: billingRecords.amount,
-        createdAt: billingRecords.createdAt,
-      })
-      .from(billingRecords),
+    (() => {
+      const query = db
+        .select({
+          id: diagnosticOrders.id,
+          patientName: patients.name,
+          testType: diagnosticOrders.testType,
+          doctorName: facilityUsers.name,
+          orderStatus: diagnosticOrders.status,
+          createdAt: diagnosticOrders.createdAt,
+          updatedAt: diagnosticOrders.updatedAt,
+          prescriptionStatus: prescriptions.status,
+        })
+        .from(diagnosticOrders)
+        .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+        .innerJoin(facilityUsers, eq(diagnosticOrders.doctorId, facilityUsers.id))
+        .leftJoin(prescriptions, eq(prescriptions.orderId, diagnosticOrders.id));
+
+      if (isAdmin) return query;
+      if (session.role === "lab_tech") {
+        return query.where(eq(diagnosticOrders.labId, session.facilityId));
+      }
+      if (session.role === "pharmacist") {
+        return query.where(eq(prescriptions.pharmacyId, session.facilityId));
+      }
+      if (session.role === "doctor") {
+        return query.where(eq(diagnosticOrders.doctorId, session.facilityUserId));
+      }
+      return query.where(eq(diagnosticOrders.facilityId, session.facilityId));
+    })(),
+    (() => {
+      const query = db
+        .select({
+          amount: billingRecords.amount,
+          createdAt: billingRecords.createdAt,
+        })
+        .from(billingRecords)
+        .innerJoin(
+          diagnosticOrders,
+          eq(billingRecords.orderId, diagnosticOrders.id),
+        );
+
+      if (isAdmin) return query;
+      return query.where(eq(diagnosticOrders.facilityId, session.facilityId));
+    })(),
   ]);
 
   const rows: DashboardRow[] = orders.map((order) => ({
@@ -176,7 +204,7 @@ export default async function DashboardPage() {
           Operational Dashboard
         </div>
         <h2 className="mt-3 text-[4.1rem] leading-[0.96] tracking-[-0.06em] max-md:text-[3rem]">
-          Today at St. Luke&apos;s
+          Today at {session.facilityName}
         </h2>
       </div>
 

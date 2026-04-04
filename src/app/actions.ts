@@ -1,7 +1,7 @@
 "use server";
 
 import { randomInt } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -12,22 +12,23 @@ import {
   prescriptions,
   patients,
   aiDrafts,
+  facilities,
+  staffInvites,
+  facilityUsers,
 } from "@/lib/db/schema";
-import { generateDraft, serializeDraft } from "@/lib/ai/generate-draft";
 import { canTransition, type OrderStatus } from "@/lib/workflow/machine";
 import { transitionOrder } from "@/lib/workflow/transition";
 import { logWorkflowEvent } from "@/lib/workflow/events";
-
-// Hardcoded demo actor IDs
-const ACTORS = {
-  doctor: "a1b2c3d4-0011-4000-8000-000000000011",
-  accounts: "a1b2c3d4-0012-4000-8000-000000000012",
-  labTech: "a1b2c3d4-0013-4000-8000-000000000013",
-  pharmacist: "a1b2c3d4-0014-4000-8000-000000000014",
-  stLukes: "a1b2c3d4-0001-4000-8000-000000000001",
-  sunshineLab: "a1b2c3d4-0002-4000-8000-000000000002",
-  greenLeaf: "a1b2c3d4-0003-4000-8000-000000000003",
-} as const;
+import {
+  requirePatientSession,
+  requireProviderSession,
+} from "@/lib/auth/session";
+import { issuePatientClaim } from "@/lib/patients/claims";
+import { attestLabResult } from "@/lib/attestations/eas";
+import {
+  buildAgentkitHeader,
+  getAgentDraftEndpoint,
+} from "@/lib/agent/signer";
 
 function generateRedemptionCode() {
   return randomInt(100000, 1000000).toString();
@@ -38,6 +39,9 @@ async function getOrderStatus(orderId: string) {
     .select({
       status: diagnosticOrders.status,
       patientId: diagnosticOrders.patientId,
+      facilityId: diagnosticOrders.facilityId,
+      labId: diagnosticOrders.labId,
+      testType: diagnosticOrders.testType,
     })
     .from(diagnosticOrders)
     .where(eq(diagnosticOrders.id, orderId))
@@ -46,7 +50,55 @@ async function getOrderStatus(orderId: string) {
   return order;
 }
 
+async function getFacilityByType(type: "lab" | "pharmacy") {
+  const [facility] = await db
+    .select({
+      id: facilities.id,
+      name: facilities.name,
+      ensName: facilities.ensName,
+    })
+    .from(facilities)
+    .where(eq(facilities.type, type))
+    .limit(1);
+
+  return facility ?? null;
+}
+
+async function requestVerifiedDraft(params: {
+  orderId: string;
+  resultId: string;
+  rawText: string;
+  testType: string;
+  patientName: string;
+}) {
+  try {
+    const response = await fetch(getAgentDraftEndpoint(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        agentkit: await buildAgentkitHeader(),
+      },
+      body: JSON.stringify(params),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      console.error("[agent/draft] failed", payload?.error ?? response.statusText);
+      return { success: false as const };
+    }
+
+    return { success: true as const };
+  } catch (error) {
+    console.error("[agent/draft] failed", error);
+    return { success: false as const };
+  }
+}
+
 export async function createOrder(formData: FormData) {
+  const actor = await requireProviderSession(["doctor", "admin"]);
   const patientId = formData.get("patientId") as string;
   const testType = formData.get("testType") as string;
   const clinicalNotes = formData.get("clinicalNotes") as string;
@@ -56,14 +108,19 @@ export async function createOrder(formData: FormData) {
     return { error: "Missing required fields" };
   }
 
+  const lab = await getFacilityByType("lab");
+  if (!lab) {
+    return { error: "No lab facility has been configured yet" };
+  }
+
   // Insert order as CREATED
   const [order] = await db
     .insert(diagnosticOrders)
     .values({
       patientId,
-      facilityId: ACTORS.stLukes,
-      doctorId: ACTORS.doctor,
-      labId: ACTORS.sunshineLab,
+      facilityId: actor.facilityId,
+      doctorId: actor.facilityUserId,
+      labId: lab.id,
       status: "CREATED",
       testType,
       clinicalNotes: clinicalNotes || null,
@@ -82,26 +139,33 @@ export async function createOrder(formData: FormData) {
   await logWorkflowEvent({
     orderId: order.id,
     eventType: "ORDER_CREATED",
-    actorId: ACTORS.doctor,
-    actorRole: "doctor",
+    actorId: actor.facilityUserId,
+    actorRole: actor.role,
   });
 
   // Transition to AWAITING_PAYMENT (system transition)
   await transitionOrder({
     orderId: order.id,
     nextStatus: "AWAITING_PAYMENT",
-    actorId: ACTORS.doctor,
+    actorId: actor.facilityUserId,
     actorRole: "system",
+  });
+
+  const { claimLink } = await issuePatientClaim({
+    patientId,
+    orderId: order.id,
+    issuedBy: actor.facilityUserId,
   });
 
   revalidatePath("/dashboard");
   revalidatePath("/doctor");
   revalidatePath("/accounts");
 
-  return { success: true, orderId: order.id };
+  return { success: true, orderId: order.id, claimLink };
 }
 
 export async function confirmPayment(billingId: string) {
+  const actor = await requireProviderSession(["accounts", "admin"]);
   const [billing] = await db
     .select()
     .from(billingRecords)
@@ -132,7 +196,7 @@ export async function confirmPayment(billingId: string) {
     .update(billingRecords)
     .set({
       status: "cash_confirmed",
-      confirmedBy: ACTORS.accounts,
+      confirmedBy: actor.facilityUserId,
       confirmedAt: new Date(),
     })
     .where(eq(billingRecords.id, billingId));
@@ -141,8 +205,8 @@ export async function confirmPayment(billingId: string) {
   const paidResult = await transitionOrder({
     orderId: billing.orderId,
     nextStatus: "PAID",
-    actorId: ACTORS.accounts,
-    actorRole: "accounts",
+    actorId: actor.facilityUserId,
+    actorRole: actor.role,
   });
 
   if (!paidResult.success) {
@@ -153,7 +217,7 @@ export async function confirmPayment(billingId: string) {
   await transitionOrder({
     orderId: billing.orderId,
     nextStatus: "ROUTED_TO_LAB",
-    actorId: ACTORS.accounts,
+    actorId: actor.facilityUserId,
     actorRole: "system",
   });
 
@@ -165,11 +229,12 @@ export async function confirmPayment(billingId: string) {
 }
 
 export async function collectSample(orderId: string) {
+  const actor = await requireProviderSession(["lab_tech", "admin"]);
   const result = await transitionOrder({
     orderId,
     nextStatus: "SAMPLE_COLLECTED",
-    actorId: ACTORS.labTech,
-    actorRole: "lab_tech",
+    actorId: actor.facilityUserId,
+    actorRole: actor.role === "admin" ? "lab_tech" : actor.role,
   });
 
   if (!result.success) {
@@ -183,6 +248,7 @@ export async function collectSample(orderId: string) {
 }
 
 export async function uploadResult(orderId: string, rawText: string) {
+  const actor = await requireProviderSession(["lab_tech", "admin"]);
   if (!rawText.trim()) {
     return { error: "Result text is required" };
   }
@@ -213,16 +279,58 @@ export async function uploadResult(orderId: string, rawText: string) {
     .insert(labResults)
     .values({
       orderId,
-      labUserId: ACTORS.labTech,
+      labUserId: actor.facilityUserId,
       rawText,
     })
     .returning();
 
+  const [draftContext] = await db
+    .select({
+      patientName: patients.name,
+      patientId: diagnosticOrders.patientId,
+      testType: diagnosticOrders.testType,
+      labEns: facilities.ensName,
+      labWalletAddress: facilities.walletAddress,
+    })
+    .from(diagnosticOrders)
+    .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+    .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
+    .where(eq(diagnosticOrders.id, orderId))
+    .limit(1);
+
+  if (!draftContext) {
+    await db.delete(labResults).where(eq(labResults.id, labResult.id));
+    return { error: "Unable to resolve result provenance context" };
+  }
+
+  try {
+    const attestationUid = await attestLabResult({
+      orderId,
+      patientId: draftContext.patientId,
+      rawText,
+      labAddress: draftContext.labWalletAddress,
+      labEns: draftContext.labEns,
+    });
+
+    await db
+      .update(labResults)
+      .set({ attestationUid })
+      .where(eq(labResults.id, labResult.id));
+    await db
+      .update(diagnosticOrders)
+      .set({ attestationUid })
+      .where(eq(diagnosticOrders.id, orderId));
+  } catch (error) {
+    console.error("[uploadResult/attestation]", error);
+    await db.delete(labResults).where(eq(labResults.id, labResult.id));
+    return { error: "Result provenance attestation failed" };
+  }
+
   const uploadTransition = await transitionOrder({
     orderId,
     nextStatus: "RESULT_UPLOADED",
-    actorId: ACTORS.labTech,
-    actorRole: "lab_tech",
+    actorId: actor.facilityUserId,
+    actorRole: actor.role === "admin" ? "lab_tech" : actor.role,
   });
 
   if (!uploadTransition.success) {
@@ -233,7 +341,7 @@ export async function uploadResult(orderId: string, rawText: string) {
   const reviewTransition = await transitionOrder({
     orderId,
     nextStatus: "DOCTOR_REVIEW",
-    actorId: ACTORS.labTech,
+    actorId: actor.facilityUserId,
     actorRole: "system",
   });
 
@@ -241,34 +349,14 @@ export async function uploadResult(orderId: string, rawText: string) {
     return { error: reviewTransition.error };
   }
 
-  try {
-    const [order] = await db
-      .select({
-        testType: diagnosticOrders.testType,
-        patientName: patients.name,
-      })
-      .from(diagnosticOrders)
-      .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-      .where(eq(diagnosticOrders.id, orderId))
-      .limit(1);
-
-    if (order) {
-      const draft = await generateDraft({
-        rawText,
-        testType: order.testType,
-        patientName: order.patientName,
-      });
-
-      await db.insert(aiDrafts).values({
-        orderId,
-        resultId: labResult.id,
-        draftText: serializeDraft(draft),
-        agentVerified: false,
-      });
-    }
-  } catch (err) {
-    console.error("[AI Draft] Failed to generate draft for order", orderId, err);
-  }
+  await db.delete(aiDrafts).where(eq(aiDrafts.orderId, orderId));
+  await requestVerifiedDraft({
+    orderId,
+    resultId: labResult.id,
+    rawText,
+    testType: draftContext.testType,
+    patientName: draftContext.patientName,
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/lab");
@@ -278,6 +366,7 @@ export async function uploadResult(orderId: string, rawText: string) {
 }
 
 export async function approveActionPlan(orderId: string, formData: FormData) {
+  const actor = await requireProviderSession(["doctor", "admin"]);
   const summary = formData.get("summary") as string;
   const recommendations = formData.get("recommendations") as string;
   const drugName = formData.get("drugName") as string;
@@ -335,17 +424,23 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
     resultId: labResult.id,
     summary,
     recommendations,
-    approvedBy: ACTORS.doctor,
+    approvedBy: actor.facilityUserId,
     approvedAt: new Date(),
   }).returning();
 
   let createdPrescriptionId: string | null = null;
 
   if (wantsPrescription) {
+    const pharmacy = await getFacilityByType("pharmacy");
+    if (!pharmacy) {
+      await db.delete(actionPlans).where(eq(actionPlans.id, createdPlan.id));
+      return { error: "No pharmacy facility has been configured yet" };
+    }
+
     const [prescription] = await db.insert(prescriptions).values({
       orderId,
       patientId: order.patientId,
-      pharmacyId: ACTORS.greenLeaf,
+      pharmacyId: pharmacy.id,
       items: [{ drugName, dosage, quantity, instructions }],
       status: "ready_for_pickup",
       redemptionCode: generateRedemptionCode(),
@@ -356,8 +451,8 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
   const approveResult = await transitionOrder({
     orderId,
     nextStatus: "ACTION_PLAN_APPROVED",
-    actorId: ACTORS.doctor,
-    actorRole: "doctor",
+    actorId: actor.facilityUserId,
+    actorRole: actor.role === "admin" ? "doctor" : actor.role,
   });
 
   if (!approveResult.success) {
@@ -371,7 +466,7 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
   const notifyResult = await transitionOrder({
     orderId,
     nextStatus: "PATIENT_NOTIFIED",
-    actorId: ACTORS.doctor,
+    actorId: actor.facilityUserId,
     actorRole: "system",
   });
 
@@ -388,6 +483,7 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
 }
 
 export async function registerPatient(formData: FormData) {
+  const actor = await requireProviderSession(["doctor", "admin"]);
   const name = formData.get("name") as string;
   const phone = (formData.get("phone") as string) || null;
   const dob = (formData.get("dob") as string) || null;
@@ -400,8 +496,8 @@ export async function registerPatient(formData: FormData) {
       name: name.trim(),
       phone,
       dob,
-      registeredBy: "a1b2c3d4-0011-4000-8000-000000000011", // Dr. Adeyemi (hardcoded until auth)
-      facilityId: "a1b2c3d4-0001-4000-8000-000000000001", // St. Luke's
+      registeredBy: actor.facilityUserId,
+      facilityId: actor.facilityId,
     })
     .returning();
 
@@ -409,7 +505,43 @@ export async function registerPatient(formData: FormData) {
   return { success: true, patient };
 }
 
+export async function inviteStaff(formData: FormData) {
+  const actor = await requireProviderSession(["admin"]);
+  const name = (formData.get("name") as string | null)?.trim();
+  const email = (formData.get("email") as string | null)?.trim().toLowerCase();
+  const role = formData.get("role") as "doctor" | "accounts" | "lab_tech" | "pharmacist" | "admin" | null;
+  const facilityId = (formData.get("facilityId") as string | null)?.trim();
+
+  if (!name || !email || !role || !facilityId) {
+    return { success: false, error: "Name, email, role, and facility are required" };
+  }
+
+  const [existingUser] = await db
+    .select({ id: facilityUsers.id })
+    .from(facilityUsers)
+    .where(and(eq(facilityUsers.facilityId, facilityId), eq(facilityUsers.email, email)))
+    .limit(1);
+
+  if (existingUser) {
+    return { success: false, error: "A provider with this email already exists for that facility" };
+  }
+
+  await db.insert(staffInvites).values({
+    facilityId,
+    email,
+    role,
+    name,
+    invitedBy: actor.facilityUserId,
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+  });
+
+  revalidatePath("/admin/staff");
+
+  return { success: true };
+}
+
 export async function createOrderWithNewPatient(formData: FormData) {
+  const actor = await requireProviderSession(["doctor", "admin"]);
   const patientName = formData.get("patientName") as string;
   const patientPhone = (formData.get("patientPhone") as string) || null;
   const patientDob = (formData.get("patientDob") as string) || null;
@@ -422,6 +554,11 @@ export async function createOrderWithNewPatient(formData: FormData) {
   }
 
   try {
+    const lab = await getFacilityByType("lab");
+    if (!lab) {
+      return { success: false, error: "No lab facility has been configured yet" };
+    }
+
     // Create patient first
     const [patient] = await db
       .insert(patients)
@@ -429,8 +566,8 @@ export async function createOrderWithNewPatient(formData: FormData) {
         name: patientName.trim(),
         phone: patientPhone,
         dob: patientDob,
-        registeredBy: ACTORS.doctor,
-        facilityId: ACTORS.stLukes,
+        registeredBy: actor.facilityUserId,
+        facilityId: actor.facilityId,
       })
       .returning();
 
@@ -439,9 +576,9 @@ export async function createOrderWithNewPatient(formData: FormData) {
       .insert(diagnosticOrders)
       .values({
         patientId: patient.id,
-        facilityId: ACTORS.stLukes,
-        doctorId: ACTORS.doctor,
-        labId: ACTORS.sunshineLab,
+        facilityId: actor.facilityId,
+        doctorId: actor.facilityUserId,
+        labId: lab.id,
         status: "CREATED",
         testType,
         clinicalNotes: clinicalNotes || null,
@@ -460,93 +597,36 @@ export async function createOrderWithNewPatient(formData: FormData) {
     await logWorkflowEvent({
       orderId: order.id,
       eventType: "ORDER_CREATED",
-      actorId: ACTORS.doctor,
-      actorRole: "doctor",
+      actorId: actor.facilityUserId,
+      actorRole: actor.role,
     });
 
     // Transition to AWAITING_PAYMENT
     await transitionOrder({
       orderId: order.id,
       nextStatus: "AWAITING_PAYMENT",
-      actorId: ACTORS.doctor,
+      actorId: actor.facilityUserId,
       actorRole: "system",
+    });
+
+    const { claimLink } = await issuePatientClaim({
+      patientId: patient.id,
+      orderId: order.id,
+      issuedBy: actor.facilityUserId,
     });
 
     revalidatePath("/doctor");
     revalidatePath("/patients");
 
-    return { success: true, orderId: order.id };
+    return { success: true, orderId: order.id, claimLink };
   } catch (err) {
     console.error("[createOrderWithNewPatient] Failed:", err);
     return { success: false, error: "Failed to create order" };
   }
 }
 
-export async function simulateOnlinePayment(orderId: string) {
-  const [billing] = await db
-    .select()
-    .from(billingRecords)
-    .where(eq(billingRecords.orderId, orderId))
-    .limit(1);
-
-  if (!billing) {
-    return { success: false, error: "Billing record not found" };
-  }
-
-  if (billing.status !== "unpaid") {
-    return { success: false, error: "Payment has already been confirmed" };
-  }
-
-  const order = await getOrderStatus(orderId);
-  if (!order) {
-    return { success: false, error: "Order not found" };
-  }
-
-  if (
-    !canTransition(order.status as OrderStatus, "PAID", "accounts") ||
-    !canTransition("PAID", "ROUTED_TO_LAB", "system")
-  ) {
-    return { success: false, error: "Order is not ready for payment" };
-  }
-
-  await db
-    .update(billingRecords)
-    .set({
-      status: "online_confirmed",
-      confirmedAt: new Date(),
-    })
-    .where(eq(billingRecords.id, billing.id));
-
-  const paidResult = await transitionOrder({
-    orderId,
-    nextStatus: "PAID",
-    actorId: ACTORS.accounts,
-    actorRole: "accounts",
-  });
-
-  if (!paidResult.success) {
-    return { success: false, error: paidResult.error };
-  }
-
-  const routedResult = await transitionOrder({
-    orderId,
-    nextStatus: "ROUTED_TO_LAB",
-    actorId: ACTORS.accounts,
-    actorRole: "system",
-  });
-
-  if (!routedResult.success) {
-    return { success: false, error: routedResult.error };
-  }
-
-  revalidatePath("/mini");
-  revalidatePath("/accounts");
-  revalidatePath("/dashboard");
-
-  return { success: true };
-}
-
 export async function updateResult(resultId: string, rawText: string) {
+  await requireProviderSession(["lab_tech", "admin"]);
   if (!rawText.trim()) {
     return { success: false, error: "Result text is required" };
   }
@@ -562,40 +642,51 @@ export async function updateResult(resultId: string, rawText: string) {
     return { success: false, error: "Lab result not found" };
   }
 
-  // Fetch order info for AI draft regeneration
-  const [order] = await db
+  await db.delete(aiDrafts).where(eq(aiDrafts.orderId, updatedResult.orderId));
+
+  const [draftContext] = await db
     .select({
-      id: diagnosticOrders.id,
-      testType: diagnosticOrders.testType,
       patientName: patients.name,
+      patientId: diagnosticOrders.patientId,
+      testType: diagnosticOrders.testType,
+      labEns: facilities.ensName,
+      labWalletAddress: facilities.walletAddress,
     })
     .from(diagnosticOrders)
     .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
+    .leftJoin(facilities, eq(diagnosticOrders.labId, facilities.id))
     .where(eq(diagnosticOrders.id, updatedResult.orderId))
     .limit(1);
 
-  if (order) {
+  if (draftContext) {
     try {
-      const draft = await generateDraft({
+      const attestationUid = await attestLabResult({
+        orderId: updatedResult.orderId,
+        patientId: draftContext.patientId,
         rawText,
-        testType: order.testType,
-        patientName: order.patientName,
+        labAddress: draftContext.labWalletAddress,
+        labEns: draftContext.labEns,
       });
 
-      // Delete old draft for this order, insert new one
       await db
-        .delete(aiDrafts)
-        .where(eq(aiDrafts.orderId, order.id));
-
-      await db.insert(aiDrafts).values({
-        orderId: order.id,
-        resultId: updatedResult.id,
-        draftText: serializeDraft(draft),
-        agentVerified: false,
-      });
-    } catch (err) {
-      console.error("[updateResult] Failed to regenerate AI draft:", err);
+        .update(labResults)
+        .set({ attestationUid })
+        .where(eq(labResults.id, updatedResult.id));
+      await db
+        .update(diagnosticOrders)
+        .set({ attestationUid })
+        .where(eq(diagnosticOrders.id, updatedResult.orderId));
+    } catch (error) {
+      console.error("[updateResult/attestation]", error);
     }
+
+    await requestVerifiedDraft({
+      orderId: updatedResult.orderId,
+      resultId: updatedResult.id,
+      rawText,
+      testType: draftContext.testType,
+      patientName: draftContext.patientName,
+    });
   }
 
   revalidatePath("/lab");
@@ -605,6 +696,7 @@ export async function updateResult(resultId: string, rawText: string) {
 }
 
 export async function redeemPrescription(prescriptionId: string, code: string) {
+  await requireProviderSession(["pharmacist", "admin"]);
   const [prescription] = await db
     .select()
     .from(prescriptions)
@@ -640,7 +732,15 @@ export async function redeemPrescription(prescriptionId: string, code: string) {
 }
 
 export async function confirmReceipt(orderId: string) {
-  const PATIENT_ACTOR_ID = "00000000-0000-4000-8000-000000000000";
+  const patientSession = await requirePatientSession();
+  const order = await getOrderStatus(orderId);
+  if (!order) {
+    return { success: false, error: "Order not found" };
+  }
+
+  if (order.patientId !== patientSession.patientId) {
+    return { success: false, error: "This order does not belong to the current patient" };
+  }
 
   const [prescription] = await db
     .select({
@@ -657,7 +757,7 @@ export async function confirmReceipt(orderId: string) {
   const result = await transitionOrder({
     orderId,
     nextStatus: "COMPLETED",
-    actorId: PATIENT_ACTOR_ID,
+    actorId: patientSession.patientId,
     actorRole: "system",
   });
 

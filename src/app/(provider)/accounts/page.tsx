@@ -4,10 +4,12 @@ import {
   diagnosticOrders,
   patients,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AccountsActions } from "./accounts-actions";
+import { requireProviderSession } from "@/lib/auth/session";
 
 export default async function AccountsPage() {
+  const session = await requireProviderSession(["accounts", "admin"]);
   const pendingBills = await db
     .select({
       billingId: billingRecords.id,
@@ -24,7 +26,12 @@ export default async function AccountsPage() {
       eq(billingRecords.orderId, diagnosticOrders.id)
     )
     .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
-    .where(eq(billingRecords.status, "unpaid"))
+    .where(
+      and(
+        eq(billingRecords.status, "unpaid"),
+        eq(diagnosticOrders.facilityId, session.facilityId),
+      ),
+    )
     .orderBy(sql`${billingRecords.createdAt} desc`);
 
   const allBills = await db
@@ -32,7 +39,12 @@ export default async function AccountsPage() {
       amount: billingRecords.amount,
       status: billingRecords.status,
     })
-    .from(billingRecords);
+    .from(billingRecords)
+    .innerJoin(
+      diagnosticOrders,
+      eq(billingRecords.orderId, diagnosticOrders.id),
+    )
+    .where(eq(diagnosticOrders.facilityId, session.facilityId));
 
   const totalBilled = allBills.reduce(
     (sum, b) => sum + parseFloat(b.amount || "0"),
@@ -61,10 +73,10 @@ export default async function AccountsPage() {
           Accounts Desk
         </p>
         <h2 className="text-3xl tracking-tight leading-none mt-3">
-          Mrs. Obi
+          {session.name}
         </h2>
         <p className="mt-2 text-sm text-gray-500">
-          St. Luke&apos;s Clinic
+          {session.facilityName}
         </p>
       </div>
 

@@ -8,10 +8,10 @@ import {
 } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { PharmacyActions } from "./pharmacy-actions";
-
-const GREENLEAF_ID = "a1b2c3d4-0003-4000-8000-000000000003";
+import { requireProviderSession } from "@/lib/auth/session";
 
 export default async function PharmacyPage() {
+  const session = await requireProviderSession(["pharmacist", "admin"]);
   const pendingRx = await db
     .select({
       prescriptionId: prescriptions.id,
@@ -32,7 +32,7 @@ export default async function PharmacyPage() {
     )
     .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .innerJoin(facilityUsers, eq(diagnosticOrders.doctorId, facilityUsers.id))
-    .where(eq(prescriptions.pharmacyId, GREENLEAF_ID))
+    .where(eq(prescriptions.pharmacyId, session.facilityId))
     .orderBy(sql`${prescriptions.createdAt} desc`);
 
   const serialized = pendingRx.map((rx) => {
@@ -66,11 +66,8 @@ export default async function PharmacyPage() {
           Pharmacy Dashboard
         </p>
         <h2 className="text-3xl tracking-tight leading-none mt-3">
-          GreenLeaf Pharmacy
+          {session.facilityName}
         </h2>
-        <p className="mt-1 font-mono text-xs text-gray-400">
-          greenleaf.pisgah.eth
-        </p>
       </div>
 
       <div className="border border-gray-200 rounded-md bg-white p-4">

@@ -1,16 +1,20 @@
+import { MiniProviders } from "./providers";
+
 export default function PatientLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-100 flex items-start justify-center py-8">
-      <div className="w-[390px] min-h-[700px] border border-gray-200 rounded-[32px] overflow-hidden bg-white shadow-sm">
-        <div className="px-5 py-3 border-b border-gray-200 text-center">
-          <h2 className="text-[17px] font-bold tracking-tight">Pisgah</h2>
+    <MiniProviders>
+      <div className="min-h-screen bg-[#f3f3f1] px-4 py-6 sm:px-6">
+        <div className="mx-auto w-full max-w-[420px] rounded-[32px] border border-black/10 bg-[#111] p-3 shadow-xl">
+          <div className="mx-auto mb-4 h-[5px] w-28 rounded-full bg-white/20" />
+          <div className="overflow-hidden rounded-[26px] bg-white">
+            {children}
+          </div>
         </div>
-        <div className="p-5">{children}</div>
       </div>
-    </div>
+    </MiniProviders>
   );
 }

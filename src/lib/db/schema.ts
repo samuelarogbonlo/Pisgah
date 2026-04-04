@@ -8,6 +8,7 @@ import {
   numeric,
   boolean,
   jsonb,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -64,6 +65,8 @@ export const facilities = pgTable("facilities", {
   type: facilityTypeEnum("type").notNull(),
   ensName: text("ens_name"),
   walletAddress: text("wallet_address"),
+  verificationStatus: text("verification_status").default("pending"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
@@ -85,8 +88,38 @@ export const facilityUsers = pgTable("facility_users", {
   role: facilityUserRoleEnum("role").notNull(),
   name: text("name").notNull(),
   email: text("email"),
+  phone: text("phone"),
+  licenseNumber: text("license_number"),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+export const staffInvites = pgTable(
+  "staff_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    facilityId: uuid("facility_id")
+      .notNull()
+      .references(() => facilities.id),
+    email: text("email").notNull(),
+    role: facilityUserRoleEnum("role").notNull(),
+    name: text("name").notNull(),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => facilityUsers.id),
+    claimedBy: uuid("claimed_by").references(() => facilityUsers.id),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    facilityEmailIdx: uniqueIndex("staff_invites_facility_email_created_idx").on(
+      table.facilityId,
+      table.email,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const patients = pgTable("patients", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -124,6 +157,28 @@ export const diagnosticOrders = pgTable("diagnostic_orders", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+export const patientClaims = pgTable(
+  "patient_claims",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    token: text("token").notNull(),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patients.id),
+    orderId: uuid("order_id").references(() => diagnosticOrders.id),
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => facilityUsers.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimedByWallet: text("claimed_by_wallet"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex("patient_claims_token_idx").on(table.token),
+  }),
+);
 
 export const billingRecords = pgTable("billing_records", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -200,6 +255,36 @@ export const prescriptions = pgTable("prescriptions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const worldIdVerifications = pgTable("world_id_verifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  patientId: uuid("patient_id")
+    .notNull()
+    .references(() => patients.id),
+  action: text("action").notNull(),
+  orderId: uuid("order_id").references(() => diagnosticOrders.id),
+  prescriptionId: uuid("prescription_id").references(() => prescriptions.id),
+  nullifierHash: text("nullifier_hash").notNull(),
+  merkleRoot: text("merkle_root"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const agentRequestLog = pgTable(
+  "agent_request_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    agentAddress: text("agent_address").notNull(),
+    nonce: text("nonce").notNull(),
+    uri: text("uri").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    nonceIdx: uniqueIndex("agent_request_log_nonce_idx").on(table.nonce),
+  }),
+);
+
 export const workflowEvents = pgTable("workflow_events", {
   id: uuid("id").defaultRandom().primaryKey(),
   orderId: uuid("order_id")
@@ -216,6 +301,7 @@ export const workflowEvents = pgTable("workflow_events", {
 
 export const facilitiesRelations = relations(facilities, ({ many }) => ({
   facilityUsers: many(facilityUsers),
+  staffInvites: many(staffInvites),
   patients: many(patients),
   diagnosticOrders: many(diagnosticOrders, { relationName: "orderFacility" }),
   labOrders: many(diagnosticOrders, { relationName: "orderLab" }),
@@ -238,12 +324,32 @@ export const facilityUsersRelations = relations(
       references: [facilities.id],
     }),
     registeredPatients: many(patients),
+    issuedPatientClaims: many(patientClaims),
+    createdInvites: many(staffInvites, { relationName: "staffInviteCreator" }),
+    claimedInvites: many(staffInvites, { relationName: "staffInviteClaimer" }),
     diagnosticOrders: many(diagnosticOrders),
     billingConfirmations: many(billingRecords),
     labResults: many(labResults),
     approvedActionPlans: many(actionPlans),
   })
 );
+
+export const staffInvitesRelations = relations(staffInvites, ({ one }) => ({
+  facility: one(facilities, {
+    fields: [staffInvites.facilityId],
+    references: [facilities.id],
+  }),
+  inviter: one(facilityUsers, {
+    relationName: "staffInviteCreator",
+    fields: [staffInvites.invitedBy],
+    references: [facilityUsers.id],
+  }),
+  claimer: one(facilityUsers, {
+    relationName: "staffInviteClaimer",
+    fields: [staffInvites.claimedBy],
+    references: [facilityUsers.id],
+  }),
+}));
 
 export const patientsRelations = relations(patients, ({ one, many }) => ({
   registeredByUser: one(facilityUsers, {
@@ -255,7 +361,24 @@ export const patientsRelations = relations(patients, ({ one, many }) => ({
     references: [facilities.id],
   }),
   diagnosticOrders: many(diagnosticOrders),
+  claims: many(patientClaims),
   prescriptions: many(prescriptions),
+  worldIdVerifications: many(worldIdVerifications),
+}));
+
+export const patientClaimsRelations = relations(patientClaims, ({ one }) => ({
+  patient: one(patients, {
+    fields: [patientClaims.patientId],
+    references: [patients.id],
+  }),
+  order: one(diagnosticOrders, {
+    fields: [patientClaims.orderId],
+    references: [diagnosticOrders.id],
+  }),
+  issuedByUser: one(facilityUsers, {
+    fields: [patientClaims.issuedBy],
+    references: [facilityUsers.id],
+  }),
 }));
 
 export const diagnosticOrdersRelations = relations(
