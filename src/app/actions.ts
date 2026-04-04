@@ -113,6 +113,33 @@ async function requestVerifiedDraft(params: {
   }
 }
 
+async function sendPatientClaimLinkEmail(params: {
+  email: string | null | undefined;
+  patientName: string;
+  hospitalName: string;
+  testType: string;
+  claimLink: string;
+}) {
+  if (!params.email) {
+    return { sent: false as const, reason: "missing-email" as const };
+  }
+
+  try {
+    const { sendPatientClaimEmail } = await import("@/lib/email/send-patient-claim");
+    await sendPatientClaimEmail({
+      to: params.email,
+      patientName: params.patientName,
+      hospitalName: params.hospitalName,
+      testType: params.testType,
+      claimLink: params.claimLink,
+    });
+    return { sent: true as const };
+  } catch (emailError) {
+    console.error("[patientClaimEmail] Email send failed:", emailError);
+    return { sent: false as const, reason: "send-failed" as const };
+  }
+}
+
 export async function createOrder(formData: FormData) {
   const actor = await requireProviderSession(["doctor", "admin"]);
   const patientId = formData.get("patientId") as string;
@@ -125,7 +152,12 @@ export async function createOrder(formData: FormData) {
   }
 
   const [patient] = await db
-    .select({ id: patients.id, facilityId: patients.facilityId })
+    .select({
+      id: patients.id,
+      facilityId: patients.facilityId,
+      name: patients.name,
+      email: patients.email,
+    })
     .from(patients)
     .where(eq(patients.id, patientId))
     .limit(1);
@@ -183,11 +215,24 @@ export async function createOrder(formData: FormData) {
     issuedBy: actor.facilityUserId,
   });
 
+  const emailResult = await sendPatientClaimLinkEmail({
+    email: patient.email,
+    patientName: patient.name,
+    hospitalName: actor.hospitalName,
+    testType,
+    claimLink,
+  });
+
   revalidatePath("/dashboard");
   revalidatePath("/doctor");
   revalidatePath("/accounts");
 
-  return { success: true, orderId: order.id, claimLink };
+  return {
+    success: true,
+    orderId: order.id,
+    claimLink,
+    claimEmailSent: emailResult.sent,
+  };
 }
 
 export async function confirmPayment(billingId: string) {
@@ -549,6 +594,7 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
 export async function registerPatient(formData: FormData) {
   const actor = await requireProviderSession(["doctor", "admin"]);
   const name = formData.get("name") as string;
+  const email = ((formData.get("email") as string) || "").trim().toLowerCase() || null;
   const phone = (formData.get("phone") as string) || null;
   const dob = (formData.get("dob") as string) || null;
 
@@ -558,6 +604,7 @@ export async function registerPatient(formData: FormData) {
     .insert(patients)
     .values({
       name: name.trim(),
+      email,
       phone,
       dob,
       registeredBy: actor.facilityUserId,
@@ -637,6 +684,7 @@ export async function inviteStaff(formData: FormData) {
 export async function createOrderWithNewPatient(formData: FormData) {
   const actor = await requireProviderSession(["doctor", "admin"]);
   const patientName = formData.get("patientName") as string;
+  const patientEmail = ((formData.get("patientEmail") as string) || "").trim().toLowerCase() || null;
   const patientPhone = (formData.get("patientPhone") as string) || null;
   const patientDob = (formData.get("patientDob") as string) || null;
   const testType = formData.get("testType") as string;
@@ -658,6 +706,7 @@ export async function createOrderWithNewPatient(formData: FormData) {
       .insert(patients)
       .values({
         name: patientName.trim(),
+        email: patientEmail,
         phone: patientPhone,
         dob: patientDob,
         registeredBy: actor.facilityUserId,
@@ -709,10 +758,23 @@ export async function createOrderWithNewPatient(formData: FormData) {
       issuedBy: actor.facilityUserId,
     });
 
+    const emailResult = await sendPatientClaimLinkEmail({
+      email: patientEmail,
+      patientName: patient.name,
+      hospitalName: actor.hospitalName,
+      testType,
+      claimLink,
+    });
+
     revalidatePath("/doctor");
     revalidatePath("/patients");
 
-    return { success: true, orderId: order.id, claimLink };
+    return {
+      success: true,
+      orderId: order.id,
+      claimLink,
+      claimEmailSent: emailResult.sent,
+    };
   } catch (err) {
     console.error("[createOrderWithNewPatient] Failed:", err);
     return { success: false, error: "Failed to create order" };
@@ -1045,5 +1107,56 @@ export async function confirmReceipt(orderId: string) {
   revalidatePath("/mini");
   revalidatePath("/dashboard");
 
+  return { success: true };
+}
+
+export async function addTest(formData: FormData) {
+  const actor = await requireProviderSession(["admin"]);
+  const testName = (formData.get("testName") as string | null)?.trim();
+  const price = (formData.get("price") as string | null)?.trim();
+  const facilityId = (formData.get("facilityId") as string | null)?.trim();
+
+  if (!testName || !price || !facilityId) {
+    return { success: false, error: "Test name, price, and facility are required" };
+  }
+
+  const facility = await findFacilityInHospital(actor.hospitalId, facilityId);
+  if (!facility) {
+    return { success: false, error: "Facility does not belong to your hospital" };
+  }
+
+  await db.insert(testCatalog).values({
+    facilityId,
+    testName,
+    price,
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/doctor");
+  return { success: true };
+}
+
+export async function removeTest(testId: string) {
+  const actor = await requireProviderSession(["admin"]);
+
+  const [test] = await db
+    .select({ id: testCatalog.id, facilityId: testCatalog.facilityId })
+    .from(testCatalog)
+    .where(eq(testCatalog.id, testId))
+    .limit(1);
+
+  if (!test) {
+    return { success: false, error: "Test not found" };
+  }
+
+  const facility = await findFacilityInHospital(actor.hospitalId, test.facilityId);
+  if (!facility) {
+    return { success: false, error: "Test does not belong to your hospital" };
+  }
+
+  await db.delete(testCatalog).where(eq(testCatalog.id, testId));
+
+  revalidatePath("/settings");
+  revalidatePath("/doctor");
   return { success: true };
 }

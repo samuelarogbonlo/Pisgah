@@ -8,8 +8,18 @@ export function generateClaimToken() {
 }
 
 export function buildClaimLink(token: string) {
+  const appId = process.env.NEXT_PUBLIC_WORLD_APP_ID;
+  const claimPath = `/mini/claim/${token}`;
+
+  // If World App ID is configured, generate a World App deep link
+  // This ensures the link opens in World App directly at the correct path
+  if (appId) {
+    return `https://world.org/mini-app?app_id=${appId}&path=${encodeURIComponent(claimPath)}`;
+  }
+
+  // Fallback to direct URL for development without World App
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
-  return `${baseUrl.replace(/\/$/, "")}/mini/claim/${token}`;
+  return `${baseUrl.replace(/\/$/, "")}${claimPath}`;
 }
 
 export async function issuePatientClaim(params: {

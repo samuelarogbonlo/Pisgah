@@ -30,8 +30,16 @@ export function CreateOrderForm({
   const [message, setMessage] = useState<string | null>(null);
   const [claimLink, setClaimLink] = useState<string | null>(null);
   const [isNewPatient, setIsNewPatient] = useState(false);
-  const [selectedTest, setSelectedTest] = useState(catalog[0]?.testName ?? "");
-  const [amount, setAmount] = useState(catalog[0]?.price ?? "0");
+  const firstTest = catalog[0]?.testName ?? "";
+  const firstPrice = catalog[0]?.price ?? "0";
+  const [selectedTest, setSelectedTest] = useState(firstTest);
+  const [amount, setAmount] = useState(firstPrice);
+
+  // If catalog changes (e.g. navigated back after admin added tests), sync
+  if (catalog.length > 0 && selectedTest === "" && firstTest !== "") {
+    setSelectedTest(firstTest);
+    setAmount(firstPrice);
+  }
 
   function handleTestChange(testName: string) {
     setSelectedTest(testName);
@@ -50,7 +58,11 @@ export function CreateOrderForm({
       if (result.error) {
         setMessage(`Error: ${result.error}`);
       } else {
-        setMessage("Order created successfully");
+        setMessage(
+          "claimEmailSent" in result && result.claimEmailSent
+            ? "Order created successfully. Patient link emailed."
+            : "Order created successfully",
+        );
         setClaimLink("claimLink" in result ? result.claimLink ?? null : null);
         setTimeout(() => setMessage(null), 3000);
       }
@@ -118,6 +130,17 @@ export function CreateOrderForm({
                 name="patientName"
                 required
                 placeholder="Full name"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] tracking-[0.14em] uppercase text-gray-500 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                name="patientEmail"
+                placeholder="patient@example.com"
                 className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700"
               />
             </div>

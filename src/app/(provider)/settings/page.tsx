@@ -7,6 +7,7 @@ import { updateFacilityWallet, verifyFacilityEns } from "@/app/actions";
 import { buildStaffInviteLink } from "@/lib/auth/invites";
 import { InviteStaffForm } from "../admin/staff/staff-form";
 import { SettingsClient } from "./settings-client";
+import { TestCatalogManager } from "./test-catalog-form";
 
 function getEnsBadge(ensName: string | null, verificationStatus: string) {
   if (!ensName) {
@@ -190,35 +191,18 @@ export default async function SettingsPage() {
         <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#6d6d6d]">
           Hospital Test Catalog
         </h2>
-        <div className="mt-4">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[#d8d8d2] text-left text-xs uppercase tracking-[0.1em] text-[#6d6d6d]">
-                <th className="pb-2 font-medium">Test</th>
-                <th className="pb-2 font-medium">Facility</th>
-                <th className="pb-2 text-right font-medium">Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tests.map((t) => (
-                <tr key={t.id} className="border-b border-[#d8d8d2]/50">
-                  <td className="py-2.5">{t.testName}</td>
-                  <td className="py-2.5 text-[#6d6d6d]">{t.facilityName}</td>
-                  <td className="py-2.5 text-right font-mono">
-                    {Number(t.price).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-              {tests.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="py-4 text-center text-[#6d6d6d]">
-                    No tests configured
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <TestCatalogManager
+          tests={tests.map((t) => ({
+            id: t.id,
+            testName: t.testName,
+            price: t.price,
+            facilityName: t.facilityName,
+          }))}
+          facilities={hospitalFacilities.map((f) => ({
+            id: f.id,
+            name: f.name,
+          }))}
+        />
       </section>
 
       {/* Staff Management */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { orbLegacy, type IDKitRequestConfig, IDKitRequestWidget, type IDKitResult } from "@worldcoin/idkit";
 import { MiniKit } from "@worldcoin/minikit-js";
@@ -170,6 +170,8 @@ export function PatientMiniClient({
   const [verificationConfig, setVerificationConfig] = useState<VerificationConfig | null>(null);
   const [verificationOpen, setVerificationOpen] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
+  const [isInWorldApp, setIsInWorldApp] = useState(false);
 
   const awaitingPayment = order.displayStatus === "Awaiting Payment";
   const processing =
@@ -194,6 +196,11 @@ export function PatientMiniClient({
       return null;
     }
     return MiniKit.getMiniAppUrl(appId, "/mini");
+  }, []);
+
+  useEffect(() => {
+    setHasMounted(true);
+    setIsInWorldApp(MiniKit.isInWorldApp());
   }, []);
 
   async function beginVerification(mode: VerificationMode) {
@@ -267,7 +274,7 @@ export function PatientMiniClient({
         <span className="text-xs text-gray-500">Doctor-approved patient updates</span>
       </div>
 
-      {!MiniKit.isInWorldApp() && (
+      {hasMounted && !isInWorldApp && (
         <div className="mt-4 rounded-lg border border-black/10 bg-[#f8f8f6] p-3 text-sm text-[#6d6d6d]">
           Open this claim in World App on your phone.
           {deepLink && (

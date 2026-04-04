@@ -34,7 +34,8 @@ export default async function DoctorPage() {
     db
       .select({ testName: testCatalog.testName, price: testCatalog.price })
       .from(testCatalog)
-      .where(eq(testCatalog.facilityId, session.facilityId))
+      .innerJoin(facilities, eq(testCatalog.facilityId, facilities.id))
+      .where(eq(facilities.hospitalId, session.hospitalId))
       .orderBy(testCatalog.testName),
     (() => {
       const query = db

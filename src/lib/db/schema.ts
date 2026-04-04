@@ -154,6 +154,7 @@ export const staffInvites = pgTable(
 export const patients = pgTable("patients", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  email: text("email"),
   phone: text("phone"),
   dob: date("dob"),
   worldIdHash: text("world_id_hash"),

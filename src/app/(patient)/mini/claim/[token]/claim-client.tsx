@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MiniKit } from "@worldcoin/minikit-js";
 
@@ -18,11 +18,18 @@ export function ClaimClient({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
+  const [isInWorldApp, setIsInWorldApp] = useState(false);
 
   const appId = process.env.NEXT_PUBLIC_WORLD_APP_ID;
   const openInWorldUrl = appId
     ? MiniKit.getMiniAppUrl(appId, `/mini/claim/${token}`)
     : null;
+
+  useEffect(() => {
+    setHasMounted(true);
+    setIsInWorldApp(MiniKit.isInWorldApp());
+  }, []);
 
   async function handleContinue() {
     try {
@@ -91,28 +98,36 @@ export function ClaimClient({
         </p>
       </div>
 
-      {MiniKit.isInWorldApp() ? (
-        <button
-          type="button"
-          onClick={() => void handleContinue()}
-          disabled={isPending}
-          className="mt-5 inline-flex rounded-full border border-black bg-black px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
-        >
-          {isPending ? "Linking..." : "Continue with World App"}
-        </button>
+      {hasMounted ? (
+        isInWorldApp ? (
+          <button
+            type="button"
+            onClick={() => void handleContinue()}
+            disabled={isPending}
+            className="mt-5 inline-flex rounded-full border border-black bg-black px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
+          >
+            {isPending ? "Linking..." : "Continue with World App"}
+          </button>
+        ) : (
+          <div className="mt-5">
+            <p className="text-sm text-[#6d6d6d]">
+              Open this claim on your phone in World App.
+            </p>
+            {openInWorldUrl && (
+              <a
+                href={openInWorldUrl}
+                className="mt-3 inline-flex rounded-full border border-black bg-black px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-white"
+              >
+                Open in World App
+              </a>
+            )}
+          </div>
+        )
       ) : (
-        <div className="mt-5">
+        <div className="mt-5 rounded-[10px] border border-black/10 bg-[#f8f8f6] p-4">
           <p className="text-sm text-[#6d6d6d]">
-            Open this claim on your phone in World App.
+            Preparing secure World App sign-in...
           </p>
-          {openInWorldUrl && (
-            <a
-              href={openInWorldUrl}
-              className="mt-3 inline-flex rounded-full border border-black bg-black px-4 py-2.5 text-[11px] uppercase tracking-[0.16em] text-white"
-            >
-              Open in World App
-            </a>
-          )}
         </div>
       )}
 
