@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { DynamicWidget, getAuthToken, useDynamicContext, useIsLoggedIn } from "@dynamic-labs/sdk-react-core";
 import { useRouter } from "next/navigation";
+import { SetupHospitalForm } from "./setup-hospital-form";
 
 type SessionBootstrapResponse =
   | { success: true; session?: unknown }
@@ -25,7 +26,7 @@ export function LoginClient() {
   const { sdkHasLoaded, user } = useDynamicContext();
   const [checkingSession, setCheckingSession] = useState(false);
   const [sessionResult, setSessionResult] = useState<SessionBootstrapResponse | null>(null);
-  const [bootstrapCode, setBootstrapCode] = useState("");
+  const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [phone, setPhone] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +99,39 @@ export function LoginClient() {
     };
   }, [checkingSession, isLoggedIn, profile, router, sdkHasLoaded, sessionResult]);
 
+  const needsOnboarding =
+    sessionResult !== null &&
+    "needsOnboarding" in sessionResult &&
+    sessionResult.needsOnboarding === true;
+
+  useEffect(() => {
+    if (!needsOnboarding || setupComplete !== null) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkSetup() {
+      try {
+        const response = await fetch("/api/provider/check-setup");
+        const payload = (await response.json()) as { setupComplete: boolean };
+        if (!cancelled) {
+          setSetupComplete(payload.setupComplete);
+        }
+      } catch {
+        if (!cancelled) {
+          setSetupComplete(false);
+        }
+      }
+    }
+
+    void checkSetup();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [needsOnboarding, setupComplete]);
+
   function handleClaimInvite() {
     startTransition(async () => {
       try {
@@ -134,46 +168,6 @@ export function LoginClient() {
     });
   }
 
-  function handleBootstrap() {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const token = getAuthToken();
-        if (!token) {
-          throw new Error("Dynamic login is required first");
-        }
-
-        const response = await fetch("/api/provider/bootstrap", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            code: bootstrapCode,
-            email: profile.email,
-            name: profile.name,
-            phone,
-          }),
-        });
-
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Unable to bootstrap admin");
-        }
-
-        router.replace("/dashboard");
-        router.refresh();
-      } catch (bootstrapError) {
-        setError(
-          bootstrapError instanceof Error
-            ? bootstrapError.message
-            : "Unable to bootstrap the hospital admin",
-        );
-      }
-    });
-  }
-
   return (
     <div className="min-h-screen bg-[#f3f3f1] px-6 py-10">
       <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1.1fr_0.9fr]">
@@ -186,9 +180,9 @@ export function LoginClient() {
             Sign in to Pisgah
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-7 text-[#6d6d6d]">
-            Dynamic is now the only provider login path. If this account already
-            belongs to Pisgah, you will land in the correct role workspace. If
-            not, claim your invite or bootstrap the first admin.
+            Dynamic is the provider login path. If this account already belongs
+            to Pisgah, you will land in the correct role workspace. Otherwise,
+            set up your hospital or claim a staff invite.
           </p>
 
           <div className="mt-8 rounded-[10px] border border-black/10 bg-[#f8f8f6] p-5">
@@ -217,7 +211,7 @@ export function LoginClient() {
           {(!sdkHasLoaded || !isLoggedIn) && (
             <div className="mt-5 space-y-3 text-sm text-[#6d6d6d]">
               <p>Sign in with Dynamic first.</p>
-              <p>After that, Pisgah will either start your session, let you claim an invite, or let you bootstrap the first admin.</p>
+              <p>After that, Pisgah will either start your session, let you set up your hospital, or let you claim a staff invite.</p>
             </div>
           )}
 
@@ -235,72 +229,67 @@ export function LoginClient() {
                 </p>
               </div>
 
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
-                    Phone
-                  </span>
-                  <input
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    className="w-full rounded-[8px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black"
-                    placeholder="+234..."
-                  />
-                </label>
+              {needsOnboarding && setupComplete === null && (
+                <p className="text-sm text-[#6d6d6d]">Checking hospital setup...</p>
+              )}
 
-                <label className="block">
-                  <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
-                    License Number
-                  </span>
-                  <input
-                    value={licenseNumber}
-                    onChange={(event) => setLicenseNumber(event.target.value)}
-                    className="w-full rounded-[8px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black"
-                    placeholder="Optional for clinicians/pharmacists"
-                  />
-                </label>
-              </div>
+              {needsOnboarding && setupComplete === false && (
+                <SetupHospitalForm
+                  dynamicToken={getAuthToken() ?? ""}
+                  profile={profile}
+                />
+              )}
 
-              <div className="rounded-[10px] border border-black/10 p-4">
-                <p className="text-sm font-semibold text-[#161616]">Claim a staff invite</p>
-                <p className="mt-1 text-sm leading-6 text-[#6d6d6d]">
-                  Use this if the hospital admin already added you in Staff Management.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleClaimInvite}
-                  disabled={isPending}
-                  className="mt-4 inline-flex rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
-                >
-                  {isPending ? "Working..." : "Claim Invite"}
-                </button>
-              </div>
+              {(!needsOnboarding || setupComplete === true) && (
+                <>
+                  <div className="space-y-3">
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
+                        Phone
+                      </span>
+                      <input
+                        value={phone}
+                        onChange={(event) => setPhone(event.target.value)}
+                        className="w-full rounded-[8px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                        placeholder="+234..."
+                      />
+                    </label>
 
-              <div className="rounded-[10px] border border-black/10 p-4">
-                <p className="text-sm font-semibold text-[#161616]">Bootstrap the first admin</p>
-                <p className="mt-1 text-sm leading-6 text-[#6d6d6d]">
-                  Use this only once, with the bootstrap code in your environment, to create the initial Pisgah admin.
-                </p>
-                <label className="mt-4 block">
-                  <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
-                    Bootstrap Code
-                  </span>
-                  <input
-                    value={bootstrapCode}
-                    onChange={(event) => setBootstrapCode(event.target.value)}
-                    className="w-full rounded-[8px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black"
-                    placeholder="PISGAH_BOOTSTRAP_CODE"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={handleBootstrap}
-                  disabled={isPending || !bootstrapCode.trim()}
-                  className="mt-4 inline-flex rounded-full border border-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-black disabled:opacity-50"
-                >
-                  {isPending ? "Working..." : "Bootstrap Admin"}
-                </button>
-              </div>
+                    <label className="block">
+                      <span className="mb-2 block text-[11px] uppercase tracking-[0.16em] text-[#6d6d6d]">
+                        License Number
+                      </span>
+                      <input
+                        value={licenseNumber}
+                        onChange={(event) => setLicenseNumber(event.target.value)}
+                        className="w-full rounded-[8px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                        placeholder="Optional for clinicians/pharmacists"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="rounded-[10px] border border-black/10 p-4">
+                    <p className="text-sm font-semibold text-[#161616]">Claim a staff invite</p>
+                    <p className="mt-1 text-sm leading-6 text-[#6d6d6d]">
+                      Use this if the hospital admin already added you in Staff Management.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleClaimInvite}
+                      disabled={isPending}
+                      className="mt-4 inline-flex rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
+                    >
+                      {isPending ? "Working..." : "Claim Invite"}
+                    </button>
+                  </div>
+
+                  {needsOnboarding && setupComplete === true && (
+                    <p className="text-sm leading-6 text-[#6d6d6d]">
+                      No invite found? Contact your hospital administrator.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           )}
         </section>

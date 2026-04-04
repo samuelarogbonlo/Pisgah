@@ -65,7 +65,7 @@ export const facilities = pgTable("facilities", {
   type: facilityTypeEnum("type").notNull(),
   ensName: text("ens_name"),
   walletAddress: text("wallet_address"),
-  verificationStatus: text("verification_status").default("pending"),
+  verificationStatus: text("verification_status").default("pending").notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

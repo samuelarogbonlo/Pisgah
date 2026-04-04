@@ -6,9 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "seed": "tsx scripts/setup-hospital.ts",
-    "setup:hospital": "tsx scripts/setup-hospital.ts"
+    "lint": "next lint"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +19,7 @@
     "@dynamic-labs/ethereum": "^4.75.0",
     "@dynamic-labs/sdk-react-core": "^4.75.0",
     "@ethereum-attestation-service/eas-sdk": "^2.9.0",
+    "@namestone/namestone-sdk": "^0.2.15",
     "@neondatabase/serverless": "^1.0.2",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/react": "^19.2.14",

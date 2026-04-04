@@ -27,6 +27,7 @@ const NAV_ITEMS: Array<{
   { href: "/review", label: "Doctor Review", roles: ["doctor", "admin"] },
   { href: "/pharmacy", label: "Pharmacy", roles: ["pharmacist", "admin"] },
   { href: "/admin/staff", label: "Staff", roles: ["admin"] },
+  { href: "/settings", label: "Settings", roles: ["admin"] },
 ];
 
 export function ProviderShell({

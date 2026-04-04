@@ -731,6 +731,37 @@ export async function redeemPrescription(prescriptionId: string, code: string) {
   return { success: true };
 }
 
+export async function promoteToAdmin(targetUserId: string) {
+  const actor = await requireProviderSession(["admin"]);
+
+  if (actor.facilityUserId === targetUserId) {
+    return { error: "Cannot promote yourself" };
+  }
+
+  const [targetUser] = await db
+    .select({ id: facilityUsers.id, role: facilityUsers.role })
+    .from(facilityUsers)
+    .where(eq(facilityUsers.id, targetUserId))
+    .limit(1);
+
+  if (!targetUser) {
+    return { error: "User not found" };
+  }
+
+  if (targetUser.role === "admin") {
+    return { error: "User is already an admin" };
+  }
+
+  await db
+    .update(facilityUsers)
+    .set({ role: "admin" })
+    .where(eq(facilityUsers.id, targetUserId));
+
+  revalidatePath("/settings");
+
+  return { success: true };
+}
+
 export async function confirmReceipt(orderId: string) {
   const patientSession = await requirePatientSession();
   const order = await getOrderStatus(orderId);
