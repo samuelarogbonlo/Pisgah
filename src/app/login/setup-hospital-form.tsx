@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { getAuthToken } from "@dynamic-labs/sdk-react-core";
+
 import { useRouter } from "next/navigation";
 
 const NIGERIAN_STATES = [
@@ -141,7 +141,7 @@ export function SetupHospitalForm({ dynamicToken, profile }: SetupHospitalFormPr
           type: config.type,
         }));
 
-        const token = getAuthToken() ?? dynamicToken;
+        const token = dynamicToken;
         if (!token) {
           throw new Error("Authentication required. Please sign in again.");
         }
