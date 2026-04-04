@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { TimelinePanel } from "./timeline-panel";
+import { ProvenancePanel } from "./provenance-panel";
 
 type OrderRow = {
   id: string;
@@ -85,6 +86,10 @@ export function OrderTable({ rows }: { rows: OrderRow[] }) {
                       Audit Trail
                     </p>
                     <TimelinePanel orderId={row.id} />
+
+                    <div className="mt-4 border-t border-gray-200 pt-3">
+                      <ProvenancePanel orderId={row.id} />
+                    </div>
                   </td>
                 </tr>
               )}

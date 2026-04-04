@@ -7,11 +7,13 @@ import {
   parseAgentDraftEnvelope,
   type AgentDraftProvenance,
 } from "@/lib/agent";
+import { AgentIdentityCard } from "./agent-identity-card";
 
 interface ReviewFormProps {
   orderId: string;
   aiDraft: string | null;
   provenance: AgentDraftProvenance | null;
+  draftCreatedAt: string | null;
   pharmacyName: string;
   pharmacyEns: string | null;
 }
@@ -20,6 +22,7 @@ export function ReviewForm({
   orderId,
   aiDraft,
   provenance,
+  draftCreatedAt,
   pharmacyName,
   pharmacyEns,
 }: ReviewFormProps) {
@@ -170,16 +173,11 @@ export function ReviewForm({
       </div>
 
       {provenance?.verified && (
-        <div className="mt-4 rounded-md border border-gray-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-gray-600">
-          <p className="mb-1 text-[11px] uppercase tracking-[0.14em] text-gray-500">
-            Draft Provenance
-          </p>
-          <p className="font-mono text-[11px] break-all text-gray-700">
-            {provenance.agentEnsName ?? "ENS name unavailable"}
-          </p>
-          <p className="mt-1 font-mono text-[11px] break-all text-gray-500">
-            {provenance.agentAddress}
-          </p>
+        <div className="mt-4">
+          <AgentIdentityCard
+            provenance={provenance}
+            draftCreatedAt={draftCreatedAt}
+          />
         </div>
       )}
 

@@ -196,6 +196,16 @@ export default async function ReviewPage() {
                           Stored {order.draftCreatedAt}
                         </p>
                       )}
+                      {order.provenance?.agentEnsName && (
+                        <a
+                          href={`https://app.ens.domains/${order.provenance.agentEnsName}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1.5 inline-block text-[11px] text-emerald-800 underline underline-offset-2"
+                        >
+                          Verify on ENS
+                        </a>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -226,6 +236,7 @@ export default async function ReviewPage() {
               orderId={order.id}
               aiDraft={order.aiDraft}
               provenance={order.provenance}
+              draftCreatedAt={order.draftCreatedAt}
               pharmacyName={pharmacy?.name ?? "Partner Pharmacy"}
               pharmacyEns={pharmacy?.ensName ?? null}
             />
