@@ -48,7 +48,7 @@ export const TRANSITIONS: ReadonlyMap<OrderStatus, readonly TransitionRule[]> =
       "CREATED",
       [{ to: "AWAITING_PAYMENT", allowedRoles: new Set(["system"]) }],
     ],
-    ["AWAITING_PAYMENT", [{ to: "PAID", allowedRoles: new Set(["accounts"]) }]],
+    ["AWAITING_PAYMENT", [{ to: "PAID", allowedRoles: new Set(["accounts", "system"]) }]],
     ["PAID", [{ to: "ROUTED_TO_LAB", allowedRoles: new Set(["system"]) }]],
     [
       "ROUTED_TO_LAB",

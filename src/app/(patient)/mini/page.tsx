@@ -1,10 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   actionPlans,
+  billingRecords,
   diagnosticOrders,
   facilities,
+  hospitalPaymentSettings,
   patientClaims,
+  paymentTransactions,
   prescriptions,
   worldIdVerifications,
 } from "@/lib/db/schema";
@@ -78,8 +81,10 @@ export default async function PatientMiniPage() {
       status: diagnosticOrders.status,
       testType: diagnosticOrders.testType,
       totalAmount: diagnosticOrders.totalAmount,
+      hospitalId: facilities.hospitalId,
     })
     .from(diagnosticOrders)
+    .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .where(
       and(
         eq(diagnosticOrders.id, claim.orderId),
@@ -91,6 +96,35 @@ export default async function PatientMiniPage() {
   if (!order) {
     return <MiniInstruction />;
   }
+
+  const [billing] = await db
+    .select({
+      id: billingRecords.id,
+      amount: billingRecords.amount,
+      status: billingRecords.status,
+    })
+    .from(billingRecords)
+    .where(eq(billingRecords.orderId, order.id))
+    .limit(1);
+
+  const [paymentSettings] = await db
+    .select({
+      opayEnabled: hospitalPaymentSettings.opayEnabled,
+      worldPayEnabled: hospitalPaymentSettings.worldPayEnabled,
+    })
+    .from(hospitalPaymentSettings)
+    .where(eq(hospitalPaymentSettings.hospitalId, order.hospitalId))
+    .limit(1);
+
+  const [latestPaymentAttempt] = await db
+    .select({
+      provider: paymentTransactions.provider,
+      status: paymentTransactions.status,
+    })
+    .from(paymentTransactions)
+    .where(eq(paymentTransactions.orderId, order.id))
+    .orderBy(desc(paymentTransactions.createdAt))
+    .limit(1);
 
   const [plan] = await db
     .select({
@@ -160,8 +194,21 @@ export default async function PatientMiniPage() {
         testType: order.testType,
         displayStatus: ORDER_PIPELINE[currentIdx]?.label ?? order.status,
         timeline,
-        amount: order.totalAmount ?? null,
+        amount: billing?.amount ?? order.totalAmount ?? null,
       }}
+      billing={
+        billing
+          ? {
+              id: billing.id,
+              status: billing.status,
+              amount: billing.amount,
+              opayEnabled: paymentSettings?.opayEnabled ?? false,
+              worldPayEnabled: paymentSettings?.worldPayEnabled ?? false,
+              latestProvider: latestPaymentAttempt?.provider ?? null,
+              latestStatus: latestPaymentAttempt?.status ?? null,
+            }
+          : null
+      }
       plan={plan ?? null}
       prescription={
         prescription
