@@ -7,6 +7,7 @@ import {
   getDynamicDisplayName,
   verifyDynamicToken,
 } from "@/lib/auth/dynamic";
+import { revalidatePath } from "next/cache";
 import { setProviderSession } from "@/lib/auth/session";
 
 type ClaimInviteBody = {
@@ -128,6 +129,10 @@ export async function POST(request: Request) {
         claimedAt: now,
       })
       .where(eq(staffInvites.id, invite.id));
+
+    revalidatePath("/settings");
+    revalidatePath("/admin/staff");
+    revalidatePath("/dashboard");
 
     const response = NextResponse.json({
       success: true,

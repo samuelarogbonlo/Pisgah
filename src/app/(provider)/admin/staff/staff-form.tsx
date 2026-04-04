@@ -119,11 +119,6 @@ export function InviteStaffForm({
       {success && (
         <div className="rounded-[8px] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           <p>{success.message}</p>
-          {success.inviteLink && (
-            <p className="mt-2 break-all font-mono text-xs text-green-800">
-              {success.inviteLink}
-            </p>
-          )}
         </div>
       )}
 

@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { requireProviderSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { facilities, facilityUsers, staffInvites, testCatalog } from "@/lib/db/schema";
-import { updateFacilityWallet, verifyFacilityEns } from "@/app/actions";
 import { buildStaffInviteLink } from "@/lib/auth/invites";
 import { InviteStaffForm } from "../admin/staff/staff-form";
 import { SettingsClient } from "./settings-client";
@@ -37,17 +36,6 @@ export default async function SettingsPage() {
     redirect("/dashboard");
   }
 
-  async function saveFacilityWalletAction(formData: FormData) {
-    "use server";
-
-    await updateFacilityWallet(formData);
-  }
-
-  async function verifyFacilityEnsAction(formData: FormData) {
-    "use server";
-
-    await verifyFacilityEns(formData);
-  }
 
   const hospitalFacilities = await db
     .select({
@@ -87,7 +75,7 @@ export default async function SettingsPage() {
     })
     .from(staffInvites)
     .innerJoin(facilities, eq(staffInvites.facilityId, facilities.id))
-    .where(eq(facilities.hospitalId, session.hospitalId))
+    .where(and(eq(facilities.hospitalId, session.hospitalId), isNull(staffInvites.claimedAt)))
     .orderBy(desc(staffInvites.createdAt));
 
   const staff = await db
@@ -130,50 +118,25 @@ export default async function SettingsPage() {
                 <div>
                   <p className="text-sm font-semibold">{f.name}</p>
                   <p className="mt-0.5 font-mono text-xs text-[#6d6d6d]">
-                    {f.ensName ?? "No ENS subname provisioned yet"}
+                    {f.ensName ? (
+                      <a href={`https://app.ens.domains/${f.ensName}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-black">{f.ensName}</a>
+                    ) : "No ENS subname provisioned yet"}
                   </p>
-                  <p className="mt-1 break-all font-mono text-xs text-[#6d6d6d]">
-                    {f.walletAddress ?? "No facility wallet saved yet"}
+                  <p className="mt-0.5 break-all font-mono text-[10px] text-[#999]">
+                    {f.walletAddress ? (
+                      <a href={`https://etherscan.io/address/${f.walletAddress}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-black">{f.walletAddress}</a>
+                    ) : null}
                   </p>
                 </div>
-                <div className="flex max-w-[420px] items-center gap-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
-                      {f.type}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${ensBadge.className}`}
-                    >
-                      {ensBadge.label}
-                    </span>
-                  </div>
-                  <div className="ml-auto space-y-2">
-                    <form action={saveFacilityWalletAction} className="flex flex-wrap items-center gap-2">
-                      <input type="hidden" name="facilityId" value={f.id} />
-                      <input
-                        name="walletAddress"
-                        defaultValue={f.walletAddress ?? ""}
-                        placeholder="0x..."
-                        className="w-[220px] rounded-[8px] border border-black/10 bg-white px-3 py-2 text-xs outline-none focus:border-black"
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-full border border-black/10 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-[#161616]"
-                      >
-                        Save Wallet
-                      </button>
-                    </form>
-                    <form action={verifyFacilityEnsAction} className="flex justify-end">
-                      <input type="hidden" name="facilityId" value={f.id} />
-                      <button
-                        type="submit"
-                        disabled={!f.ensName || !f.walletAddress}
-                        className="rounded-full border border-black bg-black px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-white disabled:cursor-not-allowed disabled:border-black/10 disabled:bg-black/10 disabled:text-[#6d6d6d]"
-                      >
-                        Verify ENS
-                      </button>
-                    </form>
-                  </div>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full border border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#6d6d6d]">
+                    {f.type}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${ensBadge.className}`}
+                  >
+                    {ensBadge.label}
+                  </span>
                 </div>
               </div>
             );
