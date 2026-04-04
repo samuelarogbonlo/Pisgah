@@ -44,7 +44,9 @@ export default async function ReviewPage() {
     .where(
       and(
         eq(diagnosticOrders.status, "DOCTOR_REVIEW"),
-        eq(diagnosticOrders.facilityId, session.facilityId),
+        session.role === "admin"
+          ? inArray(diagnosticOrders.facilityId, db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId)))
+          : eq(diagnosticOrders.facilityId, session.facilityId),
       ),
     )
     .orderBy(sql`${diagnosticOrders.createdAt} desc`);

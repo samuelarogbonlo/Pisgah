@@ -2,14 +2,21 @@ import { db } from "@/lib/db";
 import {
   billingRecords,
   diagnosticOrders,
+  facilities,
   patients,
 } from "@/lib/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AccountsActions } from "./accounts-actions";
 import { requireProviderSession } from "@/lib/auth/session";
 
 export default async function AccountsPage() {
   const session = await requireProviderSession(["accounts", "admin"]);
+  const isAdmin = session.role === "admin";
+  const hospitalFacilityIds = db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId));
+  const facilityFilter = isAdmin
+    ? inArray(diagnosticOrders.facilityId, hospitalFacilityIds)
+    : eq(diagnosticOrders.facilityId, session.facilityId);
+
   const pendingBills = await db
     .select({
       billingId: billingRecords.id,
@@ -29,7 +36,7 @@ export default async function AccountsPage() {
     .where(
       and(
         eq(billingRecords.status, "unpaid"),
-        eq(diagnosticOrders.facilityId, session.facilityId),
+        facilityFilter,
       ),
     )
     .orderBy(sql`${billingRecords.createdAt} desc`);
@@ -44,7 +51,7 @@ export default async function AccountsPage() {
       diagnosticOrders,
       eq(billingRecords.orderId, diagnosticOrders.id),
     )
-    .where(eq(diagnosticOrders.facilityId, session.facilityId));
+    .where(facilityFilter);
 
   const totalBilled = allBills.reduce(
     (sum, b) => sum + parseFloat(b.amount || "0"),

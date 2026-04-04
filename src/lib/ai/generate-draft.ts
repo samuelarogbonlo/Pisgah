@@ -18,7 +18,7 @@ export async function generateDraft(params: {
   patientName: string;
 }): Promise<DraftResult> {
   const { text } = await generateText({
-    model: anthropic("claude-opus-4-20250514"),
+    model: anthropic("claude-sonnet-4-20250514"),
     system: "You are a clinical assistant at a Nigerian clinic. Analyze lab results and return ONLY a valid JSON object (no markdown, no code fences) with this exact structure: { \"summary\": \"brief interpretation under 100 words\", \"recommendations\": \"numbered list of next steps\", \"suggestedMedication\": { \"drugName\": \"...\", \"dosage\": \"...\", \"quantity\": \"...\", \"instructions\": \"...\" } or null if no medication needed }. Do not diagnose. Only summarize findings and suggest considerations.",
     prompt: `Patient: ${params.patientName}\nTest: ${params.testType}\n\nResults:\n${params.rawText}`,
   });

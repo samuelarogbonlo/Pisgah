@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { patients, diagnosticOrders } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { patients, diagnosticOrders, facilities } from "@/lib/db/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import { PatientSearch } from "./patient-search";
 import { RegisterToggle } from "./register-toggle";
 import { requireProviderSession } from "@/lib/auth/session";
@@ -17,7 +17,11 @@ export default async function PatientsPage() {
     })
     .from(patients)
     .leftJoin(diagnosticOrders, eq(patients.id, diagnosticOrders.patientId))
-    .where(eq(patients.facilityId, session.facilityId))
+    .where(
+      session.role === "admin"
+        ? inArray(patients.facilityId, db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId)))
+        : eq(patients.facilityId, session.facilityId)
+    )
     .groupBy(patients.id, patients.name, patients.phone, patients.createdAt)
     .orderBy(sql`${patients.createdAt} desc`);
 

@@ -5,7 +5,7 @@ import {
   facilities,
   labResults,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, inArray } from "drizzle-orm";
 import { LabActions } from "./lab-actions";
 import { requireProviderSession } from "@/lib/auth/session";
 
@@ -25,7 +25,14 @@ export default async function LabPage() {
     .innerJoin(patients, eq(diagnosticOrders.patientId, patients.id))
     .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .leftJoin(labResults, eq(labResults.orderId, diagnosticOrders.id))
-    .where(eq(diagnosticOrders.labId, session.facilityId))
+    .where(
+      session.role === "admin"
+        ? inArray(
+            diagnosticOrders.labId,
+            db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId))
+          )
+        : eq(diagnosticOrders.labId, session.facilityId)
+    )
     .orderBy(sql`${diagnosticOrders.createdAt} desc`);
 
   // Filter to show relevant orders (routed, sample collected, and recently uploaded)

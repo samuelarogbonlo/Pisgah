@@ -6,7 +6,7 @@ import {
   facilities,
   facilityUsers,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { PharmacyActions } from "./pharmacy-actions";
 import { requireProviderSession } from "@/lib/auth/session";
 
@@ -32,7 +32,11 @@ export default async function PharmacyPage() {
     )
     .innerJoin(facilities, eq(diagnosticOrders.facilityId, facilities.id))
     .innerJoin(facilityUsers, eq(diagnosticOrders.doctorId, facilityUsers.id))
-    .where(eq(prescriptions.pharmacyId, session.facilityId))
+    .where(
+      session.role === "admin"
+        ? inArray(prescriptions.pharmacyId, db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId)))
+        : eq(prescriptions.pharmacyId, session.facilityId)
+    )
     .orderBy(sql`${prescriptions.createdAt} desc`);
 
   const serialized = pendingRx.map((rx) => {

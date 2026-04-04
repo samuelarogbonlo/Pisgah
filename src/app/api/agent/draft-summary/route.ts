@@ -7,13 +7,18 @@ import {
   serializeAgentDraftEnvelope,
   type AgentDraftProvenance,
 } from "@/lib/agent";
-import { resolveEnsMetadataByAddress } from "@/lib/ens";
+import { verifyAgentEns } from "@/lib/ens";
 import {
   getAgentDraftEndpoint,
   recordAgentRequest,
   verifyAgentkitRequest,
 } from "@/lib/agent/signer";
 
+/**
+ * Authenticated HTTP endpoint for external callers.
+ * Requires a valid `agentkit` header with CAIP-122 signed message.
+ * Internal server actions bypass this route and call generateVerifiedAgentDraft() directly.
+ */
 export async function POST(request: Request) {
   try {
     const header = request.headers.get("agentkit");
@@ -43,14 +48,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing draft input fields" }, { status: 400 });
     }
 
-    const ensMetadata = await resolveEnsMetadataByAddress(
-      payload.address as `0x${string}`,
-    );
-    if (!ensMetadata.verified || !ensMetadata.ensName) {
-      return NextResponse.json(
-        { error: "Agent ENS metadata is not verified" },
-        { status: 403 },
-      );
+    const agentEnsName = process.env.AGENT_ENS_NAME;
+    if (!agentEnsName) {
+      return NextResponse.json({ error: "Agent ENS name not configured" }, { status: 500 });
+    }
+
+    const ensResult = await verifyAgentEns(agentEnsName, payload.address);
+    if (!ensResult.verified) {
+      console.error("[agent/draft] ENS verification failed:", ensResult.error);
+      return NextResponse.json({ error: "Agent ENS identity verification failed" }, { status: 403 });
     }
 
     const draft = await generateDraft({
@@ -58,18 +64,20 @@ export async function POST(request: Request) {
       testType: body.testType,
       patientName: body.patientName,
     });
+
     const provenance: AgentDraftProvenance = {
       kind: "agentkit",
       verified: true,
       agentAddress: payload.address,
-      agentEnsName: ensMetadata.ensName,
+      agentEnsName: ensResult.ensName,
       agentHumanId: humanId,
       chainId: payload.chainId,
       requestUrl: request.url,
       issuedAt: payload.issuedAt,
-      textRecords: ensMetadata.textRecords,
-      issues: ensMetadata.issues,
+      textRecords: ensResult.textRecords,
+      issues: [],
     };
+
     const draftText = serializeAgentDraftEnvelope(draft, provenance);
 
     await db.delete(aiDrafts).where(eq(aiDrafts.orderId, body.orderId));
@@ -84,18 +92,12 @@ export async function POST(request: Request) {
       success: true,
       draftText,
       agentVerified: true,
-      agentAddress: payload.address,
       provenance,
     });
   } catch (error) {
     console.error("[agent/draft-summary]", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to generate verified draft",
-      },
+      { error: error instanceof Error ? error.message : "Unable to generate verified draft" },
       { status: 500 },
     );
   }

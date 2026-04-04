@@ -6,3 +6,6 @@ export {
 
 export type { EnsResolutionOptions, ResolvedEnsMetadata } from "./runtime";
 
+export { verifyAgentEns } from "./verify-agent";
+export type { AgentEnsVerification } from "./verify-agent";
+

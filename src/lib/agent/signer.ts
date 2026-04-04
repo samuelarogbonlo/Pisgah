@@ -31,7 +31,7 @@ export async function buildAgentkitHeader(resourceUri = getAgentDraftEndpoint())
     version: "1",
     chainId: "eip155:480",
     type: "eip191" as const,
-    nonce: randomUUID(),
+    nonce: randomUUID().replace(/-/g, ""),
     issuedAt: new Date().toISOString(),
     resources: [resourceUri],
   };

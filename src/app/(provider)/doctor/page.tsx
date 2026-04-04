@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { diagnosticOrders, patients, facilities, testCatalog } from "@/lib/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { CreateOrderForm } from "./create-order-form";
 import { requireProviderSession } from "@/lib/auth/session";
 
@@ -29,7 +29,11 @@ export default async function DoctorPage() {
     db
       .select({ id: patients.id, name: patients.name })
       .from(patients)
-      .where(eq(patients.facilityId, session.facilityId))
+      .where(
+        isAdmin
+          ? inArray(patients.facilityId, db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId)))
+          : eq(patients.facilityId, session.facilityId)
+      )
       .orderBy(patients.name),
     db
       .select({ testName: testCatalog.testName, price: testCatalog.price })
@@ -52,7 +56,7 @@ export default async function DoctorPage() {
         .orderBy(sql`${diagnosticOrders.createdAt} desc`);
 
       if (isAdmin) {
-        return query.where(eq(diagnosticOrders.facilityId, session.facilityId));
+        return query.where(inArray(diagnosticOrders.facilityId, db.select({ id: facilities.id }).from(facilities).where(eq(facilities.hospitalId, session.hospitalId))));
       }
 
       return query.where(eq(diagnosticOrders.doctorId, session.facilityUserId));

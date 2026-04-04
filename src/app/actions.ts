@@ -3,6 +3,7 @@
 import { randomInt } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { isAddress } from "viem";
 import { db } from "@/lib/db";
 import {
@@ -31,10 +32,6 @@ import {
 } from "@/lib/auth/invites";
 import { issuePatientClaim } from "@/lib/patients/claims";
 import { attestLabResult } from "@/lib/attestations/eas";
-import {
-  buildAgentkitHeader,
-  getAgentDraftEndpoint,
-} from "@/lib/agent/signer";
 import {
   findFacilityInHospital,
   findFacilityUserInHospital,
@@ -87,26 +84,18 @@ async function requestVerifiedDraft(params: {
   testType: string;
   patientName: string;
 }) {
+  console.log("[agent/draft] starting draft generation for order", params.orderId);
   try {
-    const response = await fetch(getAgentDraftEndpoint(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        agentkit: await buildAgentkitHeader(),
-      },
-      body: JSON.stringify(params),
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-      console.error("[agent/draft] failed", payload?.error ?? response.statusText);
-      return { success: false as const };
+    const { generateVerifiedAgentDraft } = await import(
+      "@/lib/agent/generate-verified-draft"
+    );
+    const result = await generateVerifiedAgentDraft(params);
+    if (!result.success) {
+      console.error("[agent/draft] failed:", result.error);
+    } else {
+      console.log("[agent/draft] draft stored successfully for order", params.orderId);
     }
-
-    return { success: true as const };
+    return { success: result.success };
   } catch (error) {
     console.error("[agent/draft] failed", error);
     return { success: false as const };
@@ -237,6 +226,7 @@ export async function createOrder(formData: FormData) {
 
 export async function confirmPayment(billingId: string) {
   const actor = await requireProviderSession(["accounts", "admin"]);
+  const paymentActorRole = actor.role === "admin" ? "admin" : "accounts";
   const [billing] = await db
     .select()
     .from(billingRecords)
@@ -265,7 +255,7 @@ export async function confirmPayment(billingId: string) {
   }
 
   if (
-    !canTransition(order.status as OrderStatus, "PAID", "accounts") ||
+    !canTransition(order.status as OrderStatus, "PAID", paymentActorRole) ||
     !canTransition("PAID", "ROUTED_TO_LAB", "system")
   ) {
     return { error: "Order is not ready for payment confirmation" };
@@ -285,7 +275,7 @@ export async function confirmPayment(billingId: string) {
     orderId: billing.orderId,
     nextStatus: "PAID",
     actorId: actor.facilityUserId,
-    actorRole: actor.role,
+    actorRole: paymentActorRole,
   });
 
   if (!paidResult.success) {
@@ -293,12 +283,16 @@ export async function confirmPayment(billingId: string) {
   }
 
   // Auto-transition: PAID -> ROUTED_TO_LAB (system)
-  await transitionOrder({
+  const routedResult = await transitionOrder({
     orderId: billing.orderId,
     nextStatus: "ROUTED_TO_LAB",
     actorId: actor.facilityUserId,
     actorRole: "system",
   });
+
+  if (!routedResult.success) {
+    return { error: routedResult.error };
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/accounts");
@@ -451,17 +445,20 @@ export async function uploadResult(orderId: string, rawText: string) {
   }
 
   await db.delete(aiDrafts).where(eq(aiDrafts.orderId, orderId));
-  await requestVerifiedDraft({
-    orderId,
-    resultId: labResult.id,
-    rawText,
-    testType: draftContext.testType,
-    patientName: draftContext.patientName,
+
+  after(async () => {
+    await requestVerifiedDraft({
+      orderId,
+      resultId: labResult.id,
+      rawText,
+      testType: draftContext.testType,
+      patientName: draftContext.patientName,
+    });
+    revalidatePath("/review");
   });
 
   revalidatePath("/dashboard");
   revalidatePath("/lab");
-  revalidatePath("/review");
 
   return { success: true };
 }
@@ -861,17 +858,19 @@ export async function updateResult(resultId: string, rawText: string) {
       console.error("[updateResult/attestation]", error);
     }
 
-    await requestVerifiedDraft({
-      orderId: updatedResult.orderId,
-      resultId: updatedResult.id,
-      rawText,
-      testType: draftContext.testType,
-      patientName: draftContext.patientName,
+    after(async () => {
+      await requestVerifiedDraft({
+        orderId: updatedResult.orderId,
+        resultId: updatedResult.id,
+        rawText,
+        testType: draftContext.testType,
+        patientName: draftContext.patientName,
+      });
+      revalidatePath("/review");
     });
   }
 
   revalidatePath("/lab");
-  revalidatePath("/review");
 
   return { success: true };
 }
