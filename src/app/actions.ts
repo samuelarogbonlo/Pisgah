@@ -40,10 +40,20 @@ import {
   findHospitalFacilityByType,
 } from "@/lib/hospitals/scope";
 import { clearEnsProfileCache, resolveEnsProfile } from "@/lib/ens/resolver";
+import { sendWorldNotification } from "@/lib/notifications/world";
 import { syncProvisionedFacilityENS } from "@/lib/ens/provision";
 
 function generateRedemptionCode() {
   return randomInt(100000, 1000000).toString();
+}
+
+async function getPatientWallet(patientId: string) {
+  const [patient] = await db
+    .select({ walletAddress: patients.walletAddress })
+    .from(patients)
+    .where(eq(patients.id, patientId))
+    .limit(1);
+  return patient?.walletAddress ?? null;
 }
 
 async function getOrderStatus(orderId: string) {
@@ -627,6 +637,18 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
   revalidatePath("/pharmacy");
   revalidatePath("/mini");
 
+  after(async () => {
+    const wallet = await getPatientWallet(order.patientId);
+    if (wallet) {
+      await sendWorldNotification({
+        walletAddress: wallet,
+        title: "Your results are ready",
+        message: "Your doctor has reviewed your results. Open Pisgah to view.",
+        path: "/mini",
+      });
+    }
+  });
+
   return { success: true };
 }
 
@@ -979,6 +1001,7 @@ export async function dispatchPrescription(prescriptionId: string) {
   const [prescription] = await db
     .select({
       id: prescriptions.id,
+      patientId: prescriptions.patientId,
       pharmacyId: prescriptions.pharmacyId,
       status: prescriptions.status,
       hospitalId: facilities.hospitalId,
@@ -1012,6 +1035,18 @@ export async function dispatchPrescription(prescriptionId: string) {
   revalidatePath("/pharmacy");
   revalidatePath("/rider");
   revalidatePath("/mini");
+
+  after(async () => {
+    const wallet = await getPatientWallet(prescription.patientId);
+    if (wallet) {
+      await sendWorldNotification({
+        walletAddress: wallet,
+        title: "Your delivery is on the way",
+        message: "Your medication has been dispatched. A rider is heading to you.",
+        path: "/mini",
+      });
+    }
+  });
 
   return { success: true };
 }
@@ -1081,6 +1116,16 @@ export async function confirmDelivery(prescriptionId: string, code: string) {
       revalidatePath("/rider");
     } catch (error) {
       console.error("[confirmDelivery/attestation]", error);
+    }
+
+    const wallet = await getPatientWallet(prescription.patientId);
+    if (wallet) {
+      await sendWorldNotification({
+        walletAddress: wallet,
+        title: "Order completed",
+        message: "Your medication has been delivered. Thank you for using Pisgah.",
+        path: "/mini",
+      });
     }
   });
 

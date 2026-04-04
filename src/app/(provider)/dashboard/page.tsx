@@ -239,14 +239,6 @@ export default async function DashboardPage() {
             Completed Today
           </span>
         </div>
-        <div className="rounded-[8px] border border-[#d8d8d2] bg-white px-6 py-5 shadow-[0_18px_46px_rgba(0,0,0,0.08)]">
-          <strong className="block text-[2.2rem] leading-none tracking-[-0.05em]">
-            {toCurrency(billedToday)}
-          </strong>
-          <span className="mt-2 block text-[14px] text-[#5f5f5b]">
-            Billed Today
-          </span>
-        </div>
       </div>
 
       <div className="rounded-[8px] border border-[#d8d8d2] bg-white px-8 py-7 shadow-[0_18px_46px_rgba(0,0,0,0.08)] max-md:px-5 max-md:py-5">

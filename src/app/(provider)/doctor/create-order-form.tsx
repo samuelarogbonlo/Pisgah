@@ -254,14 +254,6 @@ export function CreateOrderForm({
           </div>
         )}
       </div>
-      {claimLink && (
-        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50/80 p-3">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-gray-500">
-            Patient claim link
-          </p>
-          <p className="mt-2 break-all text-sm text-gray-700">{claimLink}</p>
-        </div>
-      )}
     </form>
   );
 }

@@ -251,7 +251,13 @@ export async function POST(request: Request) {
 
       if (clinicEnsName) {
         const slug = clinicEnsName.replace(".pisgah.eth", "");
-        const agentWallet = Wallet.createRandom();
+        // Use the registered agent wallet (already verified in AgentBook)
+        // rather than generating a new unregistered one
+        const registeredAgentKey = process.env.AGENT_PRIVATE_KEY;
+        const agentWallet = registeredAgentKey
+          ? new Wallet(registeredAgentKey)
+          : Wallet.createRandom();
+
         const ensResult = await provisionAgentENS({
           clinicEnsSlug: slug,
           agentAddress: agentWallet.address,
