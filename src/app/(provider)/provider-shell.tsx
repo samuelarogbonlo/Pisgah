@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
-type ProviderRole = "doctor" | "accounts" | "lab_tech" | "pharmacist" | "admin";
+type ProviderRole = "doctor" | "accounts" | "lab_tech" | "pharmacist" | "rider" | "admin";
 
 type ProviderShellSession = {
   name: string;
@@ -38,6 +38,7 @@ const NAV_ITEMS: Array<{
   { href: "/lab", label: "Lab", roles: ["lab_tech", "admin"] },
   { href: "/review", label: "Doctor Review", roles: ["doctor", "admin"] },
   { href: "/pharmacy", label: "Pharmacy", roles: ["pharmacist", "admin"] },
+  { href: "/rider", label: "Rider", roles: ["rider", "admin"] },
   { href: "/settings", label: "Settings", roles: ["admin"] },
 ];
 

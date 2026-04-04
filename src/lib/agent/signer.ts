@@ -16,13 +16,13 @@ export function getAgentDraftEndpoint() {
   return `${baseUrl}/api/agent/draft-summary`;
 }
 
-export async function buildAgentkitHeader(resourceUri = getAgentDraftEndpoint()) {
-  const privateKey = process.env.AGENT_PRIVATE_KEY;
-  if (!privateKey) {
+export async function buildAgentkitHeader(resourceUri = getAgentDraftEndpoint(), privateKey?: string) {
+  const key = privateKey ?? process.env.AGENT_PRIVATE_KEY;
+  if (!key) {
     throw new Error("Missing AGENT_PRIVATE_KEY");
   }
 
-  const wallet = new Wallet(privateKey);
+  const wallet = new Wallet(key);
   const url = new URL(resourceUri);
   const info = {
     domain: url.hostname,

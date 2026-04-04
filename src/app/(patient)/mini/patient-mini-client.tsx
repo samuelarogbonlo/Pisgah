@@ -358,6 +358,28 @@ export function PatientMiniClient({
             Prescription
           </p>
 
+          {prescription.status === "ready_for_pickup" && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-800">
+                Your medication has been prescribed. Preparing for delivery.
+              </p>
+            </div>
+          )}
+          {prescription.status === "dispatched" && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-800">
+                Your medication has been dispatched. A rider is on the way.
+              </p>
+            </div>
+          )}
+          {prescription.status === "delivered" && (
+            <div className="mt-3 rounded-lg border border-green-200 bg-green-50 p-3">
+              <p className="text-xs text-green-800">
+                Delivery confirmed. Please confirm you received your medication below.
+              </p>
+            </div>
+          )}
+
           {prescription.items.map((item, index) => (
             <div key={`${item.drugName ?? "item"}-${index}`} className="mt-3">
               <h4 className="text-sm font-semibold">
@@ -404,7 +426,7 @@ export function PatientMiniClient({
             </div>
           )}
 
-          {prescription.status === "redeemed" && <ConfirmReceiptButton orderId={order.id} />}
+          {prescription.status === "delivered" && <ConfirmReceiptButton orderId={order.id} />}
         </div>
       )}
 

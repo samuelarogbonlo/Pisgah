@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { isAddress } from "viem";
+import { decrypt } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import {
   diagnosticOrders,
@@ -18,6 +19,7 @@ import {
   staffInvites,
   facilityUsers,
   testCatalog,
+  hospitals,
 } from "@/lib/db/schema";
 import { canTransition, type OrderStatus } from "@/lib/workflow/machine";
 import { transitionOrder } from "@/lib/workflow/transition";
@@ -86,10 +88,22 @@ async function requestVerifiedDraft(params: {
 }) {
   console.log("[agent/draft] starting draft generation for order", params.orderId);
   try {
+    const [hospitalAgent] = await db
+      .select({ agentPrivateKey: hospitals.agentPrivateKey, agentEnsName: hospitals.agentEnsName })
+      .from(hospitals)
+      .innerJoin(facilities, eq(facilities.hospitalId, hospitals.id))
+      .innerJoin(diagnosticOrders, eq(diagnosticOrders.facilityId, facilities.id))
+      .where(eq(diagnosticOrders.id, params.orderId))
+      .limit(1);
+
     const { generateVerifiedAgentDraft } = await import(
       "@/lib/agent/generate-verified-draft"
     );
-    const result = await generateVerifiedAgentDraft(params);
+    const result = await generateVerifiedAgentDraft({
+      ...params,
+      agentPrivateKey: hospitalAgent?.agentPrivateKey ? decrypt(hospitalAgent.agentPrivateKey) : undefined,
+      agentEnsName: hospitalAgent?.agentEnsName ?? undefined,
+    });
     if (!result.success) {
       console.error("[agent/draft] failed:", result.error);
     } else {
@@ -932,6 +946,101 @@ export async function redeemPrescription(prescriptionId: string, code: string) {
   return { success: true };
 }
 
+export async function dispatchPrescription(prescriptionId: string) {
+  const actor = await requireProviderSession(["pharmacist", "admin"]);
+  const [prescription] = await db
+    .select({
+      id: prescriptions.id,
+      pharmacyId: prescriptions.pharmacyId,
+      status: prescriptions.status,
+      hospitalId: facilities.hospitalId,
+    })
+    .from(prescriptions)
+    .innerJoin(facilities, eq(prescriptions.pharmacyId, facilities.id))
+    .where(eq(prescriptions.id, prescriptionId))
+    .limit(1);
+
+  if (!prescription) {
+    return { success: false, error: "Prescription not found" };
+  }
+
+  if (prescription.hospitalId !== actor.hospitalId) {
+    return { success: false, error: "That prescription does not belong to this hospital" };
+  }
+
+  if (actor.role !== "admin" && prescription.pharmacyId !== actor.facilityId) {
+    return { success: false, error: "That prescription does not belong to your pharmacy" };
+  }
+
+  if (prescription.status !== "ready_for_pickup") {
+    return { success: false, error: "Prescription is not ready for pickup" };
+  }
+
+  await db
+    .update(prescriptions)
+    .set({ status: "dispatched" })
+    .where(eq(prescriptions.id, prescription.id));
+
+  revalidatePath("/pharmacy");
+  revalidatePath("/rider");
+  revalidatePath("/mini");
+
+  return { success: true };
+}
+
+export async function confirmDelivery(prescriptionId: string, code: string) {
+  const actor = await requireProviderSession(["rider", "admin"]);
+  const [prescription] = await db
+    .select({
+      id: prescriptions.id,
+      orderId: prescriptions.orderId,
+      pharmacyId: prescriptions.pharmacyId,
+      status: prescriptions.status,
+      redemptionCode: prescriptions.redemptionCode,
+      hospitalId: facilities.hospitalId,
+    })
+    .from(prescriptions)
+    .innerJoin(facilities, eq(prescriptions.pharmacyId, facilities.id))
+    .where(eq(prescriptions.id, prescriptionId))
+    .limit(1);
+
+  if (!prescription) {
+    return { success: false, error: "Prescription not found" };
+  }
+
+  if (prescription.hospitalId !== actor.hospitalId) {
+    return { success: false, error: "That prescription does not belong to this hospital" };
+  }
+
+  if (prescription.status !== "dispatched") {
+    return { success: false, error: "Prescription has not been dispatched" };
+  }
+
+  if (code.trim() !== prescription.redemptionCode) {
+    return { success: false, error: "Invalid redemption code" };
+  }
+
+  await db
+    .update(prescriptions)
+    .set({ status: "delivered", redeemedAt: new Date() })
+    .where(eq(prescriptions.id, prescription.id));
+
+  // Auto-complete the order — delivery code proves both drugs and report are delivered
+  await transitionOrder({
+    orderId: prescription.orderId,
+    nextStatus: "COMPLETED",
+    actorId: actor.facilityUserId,
+    actorRole: "system",
+  });
+
+  revalidatePath("/rider");
+  revalidatePath("/pharmacy");
+  revalidatePath("/mini");
+  revalidatePath("/dashboard");
+
+  return { success: true };
+}
+
 export async function promoteToAdmin(targetUserId: string) {
   const actor = await requireProviderSession(["admin"]);
 
@@ -1088,8 +1197,8 @@ export async function confirmReceipt(orderId: string) {
     .where(eq(prescriptions.orderId, orderId))
     .limit(1);
 
-  if (prescription && prescription.status !== "redeemed") {
-    return { success: false, error: "Prescription must be redeemed first" };
+  if (prescription && prescription.status !== "delivered") {
+    return { success: false, error: "Prescription must be delivered first" };
   }
 
   const result = await transitionOrder({

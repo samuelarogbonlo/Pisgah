@@ -8,8 +8,10 @@ import {
   verifyDynamicToken,
 } from "@/lib/auth/dynamic";
 import { setProviderSession } from "@/lib/auth/session";
-import { provisionFacilityENS } from "@/lib/ens/provision";
+import { provisionFacilityENS, provisionAgentENS } from "@/lib/ens/provision";
 import { slugifyHospitalName } from "@/lib/hospitals/scope";
+import { encrypt } from "@/lib/crypto";
+import { Wallet } from "ethers";
 
 interface DepartmentInput {
   name: string;
@@ -229,6 +231,44 @@ export async function POST(request: Request) {
           })
           .where(eq(facilities.id, facility.id));
       }
+    }
+
+    // --- Agent ENS provisioning (non-blocking) ---
+    try {
+      const clinicFacility = insertedFacilities.find((f) => f.type === "clinic");
+      const clinicEnsName = clinicFacility
+        ? (
+            await db
+              .select({ ensName: facilities.ensName })
+              .from(facilities)
+              .where(eq(facilities.id, clinicFacility.id))
+              .limit(1)
+          )[0]?.ensName
+        : null;
+
+      if (clinicEnsName) {
+        const slug = clinicEnsName.replace(".pisgah.eth", "");
+        const agentWallet = Wallet.createRandom();
+        const ensResult = await provisionAgentENS({
+          clinicEnsSlug: slug,
+          agentAddress: agentWallet.address,
+        });
+
+        if ("ensName" in ensResult) {
+          await db
+            .update(hospitals)
+            .set({
+              agentPrivateKey: encrypt(agentWallet.privateKey),
+              agentEnsName: ensResult.ensName,
+            })
+            .where(eq(hospitals.id, setupRow.hospital_id));
+          console.log("[setup-hospital] agent ENS provisioned:", ensResult.ensName);
+        } else {
+          console.warn("[setup-hospital] agent ENS provisioning failed:", ensResult.error);
+        }
+      }
+    } catch (err) {
+      console.warn("[setup-hospital] agent provisioning error (non-blocking):", err);
     }
 
     const refreshedFacilities = await db

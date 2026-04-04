@@ -78,6 +78,7 @@ export function InviteStaffForm({
             <option value="accounts">Accounts</option>
             <option value="lab_tech">Lab Tech</option>
             <option value="pharmacist">Pharmacist</option>
+            <option value="rider">Rider</option>
           </select>
           <p className="mt-2 text-xs text-gray-500">
             Hospital admins are promoted after the staff account has been activated.

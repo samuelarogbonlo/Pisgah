@@ -1,7 +1,7 @@
 "use client";
 
-import { useTransition, useState } from "react";
-import { redeemPrescription } from "@/app/actions";
+import { useTransition } from "react";
+import { dispatchPrescription } from "@/app/actions";
 
 interface Prescription {
   prescriptionId: string;
@@ -20,6 +20,8 @@ function statusLabel(status: string): string {
     issued: "Issued",
     sent_to_pharmacy: "Sent to Pharmacy",
     ready_for_pickup: "Ready for Pickup",
+    dispatched: "Dispatched",
+    delivered: "Delivered",
     fulfilled: "Dispensed",
     redeemed: "Redeemed",
   };
@@ -27,63 +29,37 @@ function statusLabel(status: string): string {
 }
 
 function statusBadgeClass(status: string): string {
+  if (status === "dispatched") {
+    return "inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase font-semibold border border-amber-600 text-amber-700 bg-amber-50";
+  }
+  if (status === "delivered") {
+    return "inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase font-semibold border border-green-700 text-green-700 bg-green-50";
+  }
   if (status === "fulfilled" || status === "redeemed") {
     return "inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase font-semibold border border-green-700 text-green-700 bg-green-50";
   }
   return "inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase border border-gray-200 text-gray-500 bg-white";
 }
 
-function RedeemButton({
+function DispatchButton({
   prescriptionId,
 }: {
   prescriptionId: string;
 }) {
   const [isPending, startTransition] = useTransition();
-  const [dispensed, setDispensed] = useState(false);
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  if (dispensed) {
-    return (
-      <span className="text-green-700 font-semibold text-[13px]">
-        Dispensed &#10003;
-      </span>
-    );
-  }
 
   return (
-    <div className="flex items-center gap-2">
-      <input
-        type="text"
-        value={code}
-        onChange={(e) => {
-          setCode(e.target.value);
-          setError(null);
-        }}
-        placeholder="Redemption code"
-        className="px-2 py-1.5 border border-gray-200 rounded-md bg-gray-50/80 text-sm outline-none transition-colors focus:border-gray-700 w-36"
-      />
-      <button
-        onClick={() => {
-          setError(null);
-          startTransition(async () => {
-            const result = await redeemPrescription(prescriptionId, code);
-            if (result.error) {
-              setError(result.error);
-            } else {
-              setDispensed(true);
-            }
-          });
-        }}
-        disabled={isPending || !code.trim()}
-        className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
-      >
-        {isPending ? "Verifying..." : "Verify & Dispense"}
-      </button>
-      {error && (
-        <span className="text-red-600 text-sm">{error}</span>
-      )}
-    </div>
+    <button
+      onClick={() => {
+        startTransition(async () => {
+          await dispatchPrescription(prescriptionId);
+        });
+      }}
+      disabled={isPending}
+      className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
+    >
+      {isPending ? "Dispatching..." : "Mark as Dispatched"}
+    </button>
   );
 }
 
@@ -138,7 +114,6 @@ export function PharmacyActions({
             <td className="py-2.5 px-3 border-b border-gray-200 text-sm">
               <span className={statusBadgeClass(rx.status)}>
                 {statusLabel(rx.status)}
-                {rx.status === "fulfilled" && " \u2713"}
               </span>
               {rx.attestationUid && (
                 <span className="ml-2 inline-flex items-center gap-1.5 text-[11px] text-gray-500">
@@ -148,8 +123,18 @@ export function PharmacyActions({
               )}
             </td>
             <td className="py-2.5 border-b border-gray-200 text-right">
-              {rx.status !== "fulfilled" && rx.status !== "redeemed" && (
-                <RedeemButton prescriptionId={rx.prescriptionId} />
+              {rx.status === "ready_for_pickup" && (
+                <DispatchButton prescriptionId={rx.prescriptionId} />
+              )}
+              {rx.status === "dispatched" && (
+                <span className="inline-block rounded-full px-2.5 py-1 text-[10px] tracking-widest uppercase font-semibold border border-amber-600 text-amber-700 bg-amber-50">
+                  Awaiting Delivery
+                </span>
+              )}
+              {rx.status === "delivered" && (
+                <span className="inline-flex items-center gap-1.5 text-[13px] text-green-700 font-semibold">
+                  Delivered &#10003;
+                </span>
               )}
               {(rx.status === "fulfilled" || rx.status === "redeemed") && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">

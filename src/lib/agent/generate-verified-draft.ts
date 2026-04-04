@@ -20,6 +20,8 @@ interface VerifiedDraftInput {
   rawText: string;
   testType: string;
   patientName: string;
+  agentPrivateKey?: string;
+  agentEnsName?: string;
 }
 
 interface VerifiedDraftResult {
@@ -42,7 +44,7 @@ export async function generateVerifiedAgentDraft(
   const resourceUri = getAgentDraftEndpoint();
   let header: string;
   try {
-    header = await buildAgentkitHeader(resourceUri);
+    header = await buildAgentkitHeader(resourceUri, input.agentPrivateKey);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to build AgentKit header";
     console.error("[agent/draft] header build failed:", msg);
@@ -75,7 +77,7 @@ export async function generateVerifiedAgentDraft(
   }
 
   // 4. Forward-resolve agent ENS identity (non-blocking — AgentKit already verified)
-  const agentEnsName = process.env.AGENT_ENS_NAME;
+  const agentEnsName = input.agentEnsName ?? process.env.AGENT_ENS_NAME;
   let ensResult: Awaited<ReturnType<typeof verifyAgentEns>> | null = null;
   if (agentEnsName) {
     try {

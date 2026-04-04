@@ -1,4 +1,4 @@
-import NameStone from "@namestone/namestone-sdk";
+const NAMESTONE_PUBLIC_API = "https://namestone.xyz/api/public_v1/get-names";
 
 const PISGAH_AGENT_TEXT_KEYS = [
   "pisgah.agent.type",
@@ -17,6 +17,13 @@ export interface AgentEnsVerification {
   error?: string;
 }
 
+interface NameStonePublicRecord {
+  name: string;
+  address: string;
+  domain: string;
+  text_records?: Record<string, string>;
+}
+
 function normalizeValue(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? null;
 }
@@ -30,18 +37,9 @@ export async function verifyAgentEns(
   ensName: string,
   expectedAddress: string,
 ): Promise<AgentEnsVerification> {
-  const apiKey = process.env.NAMESTONE_API_KEY;
-  if (!apiKey) {
-    return {
-      verified: false,
-      ensName,
-      resolvedAddress: null,
-      textRecords: {},
-      error: "NAMESTONE_API_KEY not configured",
-    };
-  }
-
   try {
+    // NameStone stores subnames relative to the registered domain (pisgah.eth)
+    // e.g. "assistant.bluegloves-clinic.pisgah.eth" → name="assistant.bluegloves-clinic", domain="pisgah.eth"
     const parts = ensName.split(".");
     if (parts.length < 3) {
       return {
@@ -53,15 +51,30 @@ export async function verifyAgentEns(
       };
     }
 
-    const [name, ...domainParts] = parts;
-    const domain = domainParts.join(".");
-    const ns = new NameStone(apiKey);
+    const domain = parts.slice(-2).join(".");
+    const name = parts.slice(0, -2).join(".");
 
-    const results = await ns.getNames({
-      domain,
-      text_records: true,
-      limit: 100,
+    const url = new URL(NAMESTONE_PUBLIC_API);
+    url.searchParams.set("domain", domain);
+    url.searchParams.set("name", name);
+    url.searchParams.set("exact_match", "true");
+    url.searchParams.set("text_records", "true");
+
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
     });
+
+    if (!res.ok) {
+      return {
+        verified: false,
+        ensName,
+        resolvedAddress: null,
+        textRecords: {},
+        error: `NameStone public API returned ${res.status}`,
+      };
+    }
+
+    const results: NameStonePublicRecord[] = await res.json();
 
     const record = results?.find(
       (r) => r.name.toLowerCase() === name.toLowerCase(),
@@ -79,7 +92,6 @@ export async function verifyAgentEns(
 
     const resolvedAddress = record.address || null;
 
-    // Check address matches
     if (
       !resolvedAddress ||
       resolvedAddress.toLowerCase() !== expectedAddress.toLowerCase()
@@ -93,7 +105,6 @@ export async function verifyAgentEns(
       };
     }
 
-    // Build text records map from NameStone response
     const textRecords: Record<string, string | null> = {};
     for (const key of PISGAH_AGENT_TEXT_KEYS) {
       textRecords[key] = record.text_records?.[key] ?? null;

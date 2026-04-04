@@ -63,6 +63,39 @@ export async function provisionFacilityENS(params: {
   return { error: "All ENS slug attempts exhausted (collision)" };
 }
 
+export async function provisionAgentENS(params: {
+  clinicEnsSlug: string;
+  agentAddress: string;
+  supervisedBy?: string;
+}): Promise<{ ensName: string } | { error: string }> {
+  const apiKey = process.env.NAMESTONE_API_KEY;
+  if (!apiKey) return { error: "NAMESTONE_API_KEY not configured" };
+
+  const ns = new NameStone(apiKey);
+  const domain = "pisgah.eth";
+
+  try {
+    await ns.setName({
+      name: `assistant.${params.clinicEnsSlug}`,
+      domain,
+      address: params.agentAddress,
+      text_records: {
+        description: "Pisgah Clinic Assistant",
+        "pisgah.agent.type": "clinic-assistant",
+        "pisgah.agent.role": "draft-summaries,route-followups",
+        "pisgah.agent.facility": `${params.clinicEnsSlug}.${domain}`,
+        "pisgah.agent.verified": "true",
+        "pisgah.agent.supervised_by": params.supervisedBy ?? "Hospital Admin",
+      },
+    });
+
+    return { ensName: `assistant.${params.clinicEnsSlug}.${domain}` };
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    return { error: error?.message || "Agent ENS provisioning failed" };
+  }
+}
+
 export async function syncProvisionedFacilityENS(params: {
   ensName: string;
   address: `0x${string}`;

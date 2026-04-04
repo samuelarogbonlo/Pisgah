@@ -25,7 +25,7 @@ export interface ProviderSessionPayload extends JWTPayload {
   sub: string;
   dynamicUserId: string;
   facilityUserId: string;
-  role: "doctor" | "accounts" | "lab_tech" | "pharmacist" | "admin";
+  role: "doctor" | "accounts" | "lab_tech" | "pharmacist" | "rider" | "admin";
   hospitalId: string;
   hospitalName: string;
   facilityId: string;

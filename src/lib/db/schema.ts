@@ -30,6 +30,7 @@ export const facilityUserRoleEnum = pgEnum("facility_user_role", [
   "accounts",
   "lab_tech",
   "pharmacist",
+  "rider",
   "admin",
 ]);
 
@@ -58,6 +59,8 @@ export const prescriptionStatusEnum = pgEnum("prescription_status", [
   "issued",
   "sent_to_pharmacy",
   "ready_for_pickup",
+  "dispatched",
+  "delivered",
   "fulfilled",
   "redeemed",
 ]);
@@ -75,6 +78,8 @@ export const hospitals = pgTable(
     address: text("address"),
     phone: text("phone"),
     email: text("email"),
+    agentPrivateKey: text("agent_private_key"),
+    agentEnsName: text("agent_ens_name"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
