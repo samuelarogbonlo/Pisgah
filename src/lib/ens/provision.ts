@@ -32,6 +32,7 @@ export async function provisionFacilityENS(params: {
   state: string;
   lga: string;
   description?: string;
+  address?: string;
 }): Promise<{ ensName: string } | { error: string }> {
   const apiKey = process.env.NAMESTONE_API_KEY;
   if (!apiKey) return { error: "NAMESTONE_API_KEY not configured" };
@@ -47,7 +48,7 @@ export async function provisionFacilityENS(params: {
       await ns.setName({
         name: slug,
         domain,
-        address: "0x0000000000000000000000000000000000000000",
+        address: params.address ?? "0x0000000000000000000000000000000000000000",
         text_records: textRecords,
       });
       return { ensName: `${slug}.${domain}` };

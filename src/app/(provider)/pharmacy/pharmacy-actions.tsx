@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { dispatchPrescription } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Prescription {
   prescriptionId: string;
@@ -56,9 +57,9 @@ function DispatchButton({
         });
       }}
       disabled={isPending}
-      className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
     >
-      {isPending ? "Dispatching..." : "Mark as Dispatched"}
+      {isPending ? <><Spinner /> Dispatching...</> : "Mark as Dispatched"}
     </button>
   );
 }

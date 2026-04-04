@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { confirmPayment } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Bill {
   billingId: string;
@@ -49,9 +50,9 @@ function ConfirmButton({ billingId }: { billingId: string }) {
     <button
       onClick={handleClick}
       disabled={isPending}
-      className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-default"
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-default"
     >
-      {isPending ? "Confirming..." : "Confirm Payment"}
+      {isPending ? <><Spinner /> Confirming...</> : "Confirm Payment"}
     </button>
   );
 }

@@ -33,7 +33,7 @@ import {
   generateStaffInviteToken,
 } from "@/lib/auth/invites";
 import { issuePatientClaim } from "@/lib/patients/claims";
-import { attestLabResult } from "@/lib/attestations/eas";
+import { attestLabResult, attestPrescription, attestDelivery } from "@/lib/attestations/eas";
 import {
   findFacilityInHospital,
   findFacilityUserInHospital,
@@ -568,6 +568,34 @@ export async function approveActionPlan(orderId: string, formData: FormData) {
     createdPrescriptionId = prescription.id;
   }
 
+  if (createdPrescriptionId) {
+    after(async () => {
+      try {
+        const [clinicFacility] = await db
+          .select({ ensName: facilities.ensName })
+          .from(facilities)
+          .where(eq(facilities.id, actor.facilityId))
+          .limit(1);
+
+        const attestationUid = await attestPrescription({
+          orderId,
+          patientId: order.patientId,
+          prescriptionItems: [{ drugName, dosage, quantity, instructions }],
+          doctorAddress: null,
+          facilityEns: clinicFacility?.ensName ?? null,
+        });
+
+        await db.update(prescriptions)
+          .set({ attestationUid })
+          .where(eq(prescriptions.id, createdPrescriptionId));
+
+        console.log("[approveActionPlan/attestation] prescription attested:", attestationUid);
+      } catch (error) {
+        console.error("[approveActionPlan/attestation]", error);
+      }
+    });
+  }
+
   const approveResult = await transitionOrder({
     orderId,
     nextStatus: "ACTION_PLAN_APPROVED",
@@ -994,10 +1022,13 @@ export async function confirmDelivery(prescriptionId: string, code: string) {
     .select({
       id: prescriptions.id,
       orderId: prescriptions.orderId,
+      patientId: prescriptions.patientId,
       pharmacyId: prescriptions.pharmacyId,
       status: prescriptions.status,
       redemptionCode: prescriptions.redemptionCode,
       hospitalId: facilities.hospitalId,
+      pharmacyEns: facilities.ensName,
+      pharmacyAddress: facilities.walletAddress,
     })
     .from(prescriptions)
     .innerJoin(facilities, eq(prescriptions.pharmacyId, facilities.id))
@@ -1031,6 +1062,26 @@ export async function confirmDelivery(prescriptionId: string, code: string) {
     nextStatus: "COMPLETED",
     actorId: actor.facilityUserId,
     actorRole: "system",
+  });
+
+  after(async () => {
+    try {
+      const attestationUid = await attestDelivery({
+        orderId: prescription.orderId,
+        patientId: prescription.patientId,
+        pharmacyAddress: prescription.pharmacyAddress,
+        pharmacyEns: prescription.pharmacyEns,
+      });
+      await db
+        .update(prescriptions)
+        .set({ attestationUid })
+        .where(eq(prescriptions.id, prescription.id));
+      console.log("[confirmDelivery/attestation] delivery attested:", attestationUid);
+      revalidatePath("/pharmacy");
+      revalidatePath("/rider");
+    } catch (error) {
+      console.error("[confirmDelivery/attestation]", error);
+    }
   });
 
   revalidatePath("/rider");

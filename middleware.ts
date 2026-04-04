@@ -9,6 +9,7 @@ const PROTECTED_PATHS = [
   "/lab",
   "/review",
   "/pharmacy",
+  "/rider",
   "/admin",
 ];
 

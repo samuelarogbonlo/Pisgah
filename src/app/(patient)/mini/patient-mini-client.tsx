@@ -6,6 +6,7 @@ import { orbLegacy, type IDKitRequestConfig, IDKitRequestWidget, type IDKitResul
 import { MiniKit } from "@worldcoin/minikit-js";
 import { useMiniKit } from "@worldcoin/minikit-js/minikit-provider";
 import { confirmReceipt } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 type TimelineStep = {
   label: string;
@@ -143,9 +144,9 @@ function ConfirmReceiptButton({ orderId }: { orderId: string }) {
         type="button"
         onClick={handleConfirm}
         disabled={isPending}
-        className="inline-flex rounded-full border border-black bg-black px-3.5 py-2.5 text-[11px] uppercase tracking-[0.14em] text-white disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-full border border-black bg-black px-3.5 py-2.5 text-[11px] uppercase tracking-[0.14em] text-white disabled:opacity-50"
       >
-        {isPending ? "Confirming..." : "Confirm Drugs Received"}
+        {isPending ? <><Spinner /> Confirming...</> : "Confirm Drugs Received"}
       </button>
       {error && <p className="mt-2 text-[11px] text-red-600">{error}</p>}
     </div>

@@ -2,6 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { createOrder, createOrderWithNewPatient } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Patient {
   id: string;
@@ -237,16 +238,20 @@ export function CreateOrderForm({
         <button
           type="submit"
           disabled={isPending}
-          className="inline-flex items-center px-4 py-2.5 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-default"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-default"
         >
-          {isPending ? "Creating..." : "Create Order"}
+          {isPending ? <><Spinner /> Creating...</> : "Create Order"}
         </button>
         {message && (
-          <span
-            className={`text-sm ${message.startsWith("Error") ? "text-red-600" : "text-green-700"}`}
+          <div
+            className={`rounded-md border p-3 text-sm font-semibold ${
+              message.startsWith("Error")
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-green-200 bg-green-50 text-green-700 animate-in fade-in duration-300"
+            }`}
           >
             {message}
-          </span>
+          </div>
         )}
       </div>
       {claimLink && (

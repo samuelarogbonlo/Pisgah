@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { approveActionPlan } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 import {
   parseAgentDraftEnvelope,
   type AgentDraftProvenance,
@@ -191,9 +192,9 @@ export function ReviewForm({
       <button
         type="submit"
         disabled={isPending}
-        className="mt-4 inline-flex items-center rounded-md border border-black bg-black px-4 py-2.5 text-xs font-medium uppercase tracking-widest text-white transition-colors hover:bg-gray-800 disabled:opacity-40"
+        className="mt-4 inline-flex items-center gap-2 rounded-md border border-black bg-black px-4 py-2.5 text-xs font-medium uppercase tracking-widest text-white transition-colors hover:bg-gray-800 disabled:opacity-40"
       >
-        {isPending ? "Approving..." : "Approve Action Plan"}
+        {isPending ? <><Spinner /> Approving...</> : "Approve Action Plan"}
       </button>
     </form>
   );

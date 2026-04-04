@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { inviteStaff } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 export function InviteStaffForm({
   facilities,
@@ -110,9 +111,9 @@ export function InviteStaffForm({
       <button
         type="submit"
         disabled={isPending}
-        className="inline-flex rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-full border border-black bg-black px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white disabled:opacity-60"
       >
-        {isPending ? "Sending..." : "Send Invite"}
+        {isPending ? <><Spinner /> Sending...</> : "Send Invite"}
       </button>
 
       {success && (

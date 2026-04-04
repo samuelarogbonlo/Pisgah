@@ -2,6 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { confirmDelivery } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Delivery {
   prescriptionId: string;
@@ -54,9 +55,9 @@ function ConfirmDeliveryButton({
           });
         }}
         disabled={isPending || !code.trim()}
-        className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 whitespace-nowrap"
       >
-        {isPending ? "Confirming..." : "Confirm Delivery"}
+        {isPending ? <><Spinner /> Confirming...</> : "Confirm Delivery"}
       </button>
       {error && (
         <span className="text-red-600 text-sm">{error}</span>

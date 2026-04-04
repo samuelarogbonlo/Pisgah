@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addTest, removeTest } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 export function TestCatalogManager({
   tests,
@@ -79,13 +80,17 @@ export function TestCatalogManager({
         <button
           type="submit"
           disabled={isPending}
-          className="rounded-full bg-black px-4 py-2 text-[11px] font-semibold uppercase tracking-widest text-white disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-[11px] font-semibold uppercase tracking-widest text-white disabled:opacity-50"
         >
-          {isPending ? "Adding..." : "Add Test"}
+          {isPending ? <><Spinner /> Adding...</> : "Add Test"}
         </button>
       </form>
 
-      {success && <p className="text-xs text-green-700">{success}</p>}
+      {success && (
+        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700 animate-in fade-in duration-300">
+          {success}
+        </div>
+      )}
       {error && <p className="text-xs text-red-700">{error}</p>}
 
       {/* Test list */}

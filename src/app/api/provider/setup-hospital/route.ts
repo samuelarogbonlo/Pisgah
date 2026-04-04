@@ -214,11 +214,13 @@ export async function POST(request: Request) {
       .where(eq(facilities.hospitalId, setupRow.hospital_id));
 
     for (const facility of insertedFacilities) {
+      const facilityWallet = Wallet.createRandom();
       const ensResult = await provisionFacilityENS({
         name: facility.name,
         type: facility.type,
         state,
         lga: lga ?? "",
+        address: facilityWallet.address,
       });
 
       if ("ensName" in ensResult) {
@@ -226,8 +228,9 @@ export async function POST(request: Request) {
           .update(facilities)
           .set({
             ensName: ensResult.ensName,
-            verificationStatus: "provisioned",
-            verifiedAt: null,
+            walletAddress: facilityWallet.address,
+            verificationStatus: "verified",
+            verifiedAt: new Date(),
           })
           .where(eq(facilities.id, facility.id));
       }

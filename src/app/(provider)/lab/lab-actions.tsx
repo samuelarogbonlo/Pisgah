@@ -2,6 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { collectSample, uploadResult, updateResult } from "@/app/actions";
+import { Spinner } from "@/components/ui/spinner";
 
 interface LabOrder {
   id: string;
@@ -37,9 +38,9 @@ function CollectButton({ orderId }: { orderId: string }) {
     <button
       onClick={() => startTransition(async () => { await collectSample(orderId); })}
       disabled={isPending}
-      className="inline-flex items-center px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
+      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-black bg-black text-white text-[11px] tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
     >
-      {isPending ? "Collecting..." : "Collect Sample"}
+      {isPending ? <><Spinner /> Collecting...</> : "Collect Sample"}
     </button>
   );
 }
@@ -112,9 +113,9 @@ function UploadButton({
       <button
         onClick={handleSubmit}
         disabled={isPending || !rawText.trim()}
-        className="inline-flex items-center px-4 py-2.5 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
+        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
       >
-        {isPending ? "Submitting..." : "Submit Result"}
+        {isPending ? <><Spinner /> Submitting...</> : "Submit Result"}
       </button>
     </div>
   );
@@ -172,9 +173,9 @@ function EditResultButton({
         <button
           onClick={handleSubmit}
           disabled={isPending || !rawText.trim()}
-          className="inline-flex items-center px-4 py-2 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-black bg-black text-white text-xs tracking-widest uppercase font-medium hover:bg-gray-800 transition-colors disabled:opacity-40"
         >
-          {isPending ? "Saving..." : "Save Changes"}
+          {isPending ? <><Spinner /> Saving...</> : "Save Changes"}
         </button>
         <button
           onClick={() => {
