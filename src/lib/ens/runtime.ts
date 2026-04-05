@@ -188,28 +188,76 @@ export async function resolveEnsMetadataByName(
     return cached;
   }
 
-  const client = createEnsClient(options.rpcUrl);
   const issues: string[] = [];
-
   let resolvedAddress: string | null = null;
+  let textRecords: Record<string, string | null> = Object.fromEntries(
+    textKeys.map((key) => [key, null]),
+  );
 
-  try {
-    resolvedAddress = await client.getEnsAddress({ name: ensName });
-  } catch (error) {
-    issues.push(
-      error instanceof Error
-        ? `ENS forward lookup failed: ${error.message}`
-        : "ENS forward lookup failed",
-    );
+  // Use NameStone public API for pisgah.eth subnames (fast, no rate limits)
+  const parts = ensName.split(".");
+  if (parts.length >= 3 && parts.slice(-2).join(".") === "pisgah.eth") {
+    const domain = "pisgah.eth";
+    const name = parts.slice(0, -2).join(".");
+    try {
+      const url = new URL("https://namestone.xyz/api/public_v1/get-names");
+      url.searchParams.set("domain", domain);
+      url.searchParams.set("name", name);
+      url.searchParams.set("exact_match", "true");
+      url.searchParams.set("text_records", "true");
+
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const results = (await res.json()) as Array<{
+          name: string;
+          address: string;
+          text_records?: Record<string, string>;
+        }>;
+        const record = results?.find(
+          (r) => r.name.toLowerCase() === name.toLowerCase(),
+        );
+        if (record) {
+          resolvedAddress = record.address || null;
+          for (const key of textKeys) {
+            textRecords[key] = record.text_records?.[key] ?? null;
+          }
+        } else {
+          issues.push(`${ensName} not found in NameStone`);
+        }
+      } else {
+        issues.push(`NameStone API returned ${res.status}`);
+      }
+    } catch (error) {
+      issues.push(
+        error instanceof Error
+          ? `NameStone lookup failed: ${error.message}`
+          : "NameStone lookup failed",
+      );
+    }
+  } else {
+    const client = createEnsClient(options.rpcUrl);
+    try {
+      resolvedAddress = await client.getEnsAddress({ name: ensName });
+    } catch (error) {
+      issues.push(
+        error instanceof Error
+          ? `ENS forward lookup failed: ${error.message}`
+          : "ENS forward lookup failed",
+      );
+    }
+    textRecords = await readEnsTextRecords(client, ensName, textKeys);
   }
 
-  const textRecords = await readEnsTextRecords(client, ensName, textKeys);
   const verified =
-    textRecords["pisgah.agent.verified"] === "true" &&
+    (textRecords["pisgah.facility.verified"] === "true" ||
+      textRecords["pisgah.agent.verified"] === "true") &&
     Boolean(resolvedAddress);
 
-  if (textRecords["pisgah.agent.verified"] !== "true") {
-    issues.push("pisgah.agent.verified text record is not set to true");
+  if (
+    textRecords["pisgah.facility.verified"] !== "true" &&
+    textRecords["pisgah.agent.verified"] !== "true"
+  ) {
+    issues.push("No verified text record found");
   }
 
   const resolved = {
