@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { sendEmailOTP, verifyOTP } from "@dynamic-labs-sdk/client";
 import type { OTPVerification } from "@dynamic-labs-sdk/client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { initDynamicClient } from "@/lib/auth/dynamic-client";
+import {
+  initDynamicClient,
+  waitForDynamicReady,
+} from "@/lib/auth/dynamic-client";
 import { Spinner } from "@/components/ui/spinner";
 import { SetupHospitalForm } from "./setup-hospital-form";
 
@@ -78,6 +81,7 @@ export function LoginClient() {
     try {
       setAuthPending(true);
       setError(null);
+      await waitForDynamicReady();
       const verification = await sendEmailOTP({ email });
       setOtpVerification(verification);
       setAuthStep("otp");
@@ -96,6 +100,7 @@ export function LoginClient() {
     try {
       setAuthPending(true);
       setError(null);
+      await waitForDynamicReady();
       const response = await verifyOTP({
         otpVerification,
         verificationToken: otpCode,
