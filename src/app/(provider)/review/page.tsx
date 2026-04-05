@@ -225,9 +225,14 @@ export default async function ReviewPage() {
                   <p className="mb-1 text-[11px] uppercase tracking-[0.14em] text-gray-500">
                     Result Attestation UID
                   </p>
-                  <p className="break-all font-mono text-[11px] text-gray-700">
+                  <a
+                    href={`https://worldchain-sepolia.easscan.org/attestation/view/${order.attestationUid}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-all font-mono text-[11px] text-gray-700 underline underline-offset-2 hover:text-black"
+                  >
                     {order.attestationUid}
-                  </p>
+                  </a>
                 </div>
               )}
             </div>
