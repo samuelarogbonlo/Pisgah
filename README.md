@@ -6,28 +6,44 @@ Verified diagnostic workflows from lab to delivery, on-chain.
 
 ## What it does
 
-Pisgah coordinates the entire diagnostic journey: doctor orders a test, lab uploads results, AI drafts a clinical summary, doctor reviews and prescribes, pharmacy dispatches, rider delivers, patient confirms. Every step is attested on World Chain. Every facility has a verifiable ENS identity. Patient access is gated by World ID.
+Pisgah coordinates the entire diagnostic journey. A doctor orders a test, a lab uploads results, an AI assistant drafts a clinical summary, the doctor reviews and prescribes, a pharmacy dispatches, a rider delivers, and the patient confirms receipt. Every step is recorded on-chain. Every facility has a verifiable ENS identity. Patient access is protected by World ID.
 
-## Tech stack
+## Features
 
-- **Framework:** Next.js 16, TypeScript, Tailwind CSS
-- **Database:** Neon Postgres, Drizzle ORM
-- **Auth:** Dynamic JavaScript SDK (providers), MiniKit walletAuth (patients)
-- **Identity:** World ID verification, ENS subnames via NameStone
-- **AI:** Claude Sonnet via Vercel AI SDK, AgentKit verified assistant
-- **On-chain:** EAS attestations on World Chain Sepolia
-- **Deploy:** Vercel
+- Self-service hospital onboarding with auto-provisioned ENS names and wallets
+- Six staff roles with email-based invites and role-locked workspaces
+- Configurable test catalog with pricing
+- AI clinical drafts powered by a human-backed AgentKit assistant
+- Two-step World ID verification for patients (results and delivery code are gated separately)
+- Prescription dispatch and rider delivery with one-time code verification
+- Three on-chain attestations per order (lab result, prescription, delivery)
+- Public facility verification page at /verify/{ensName}
+- Agent identity card showing ENS name, wallet, and AgentBook verification status
 
-## Sponsor integrations
+## Tooling
 
-| Sponsor | Usage |
-|---------|-------|
-| Dynamic | Custom email OTP auth, JWT verification, role-based access |
-| World (MiniKit) | Patient wallet auth inside World App |
-| World (World ID) | Identity verification for viewing results and redeeming prescriptions |
-| World (AgentKit) | Human-backed AI assistant registered in AgentBook |
-| World (EAS) | On-chain attestations for lab results, prescriptions, deliveries |
-| ENS | Facility and agent identity subnames under pisgah.eth |
+| Tool | What it does |
+|------|-------------|
+| Dynamic JS SDK | Provider login, staff invites, role-based access |
+| MiniKit | Patient wallet auth inside World App |
+| World ID | Identity verification before viewing results and delivery codes |
+| AgentKit | Human-backed AI assistant with signed draft requests |
+| ENS + NameStone | Verifiable facility and agent identity subnames |
+| EAS on World Chain | On-chain attestations (hashes only, no medical data) |
+| Claude Sonnet | AI-generated clinical summaries |
+| Next.js 16 | Full-stack framework |
+| Neon Postgres + Drizzle | Database and ORM |
+| Vercel | Deployment |
+
+For detailed integration architecture and security notes, see [INTEGRATIONS.md](INTEGRATIONS.md).
+
+## What's next
+
+- **Payments:** World Pay for in-app payments that auto-advance the workflow, plus Paystack and OPay for local options
+- **Practitioner registry:** A verified, World ID-backed registry of doctors, lab techs, and pharmacists exposed as a public API, so other platforms can check if a practitioner is real and fight quackery
+- **Portable patient records:** An API that lets patients carry their diagnostic history across hospitals, with AI flagging longitudinal health trends
+- **Guardian access:** Verified family members can act on behalf of minors, elderly, or critically ill patients with clear on-chain boundaries
+- **Push notifications:** Real-time updates in World App when results are ready, medication is dispatched, or delivery is confirmed
 
 ## Try it out
 
