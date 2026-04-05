@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pisgah
 
-## Getting Started
+Verified diagnostic workflows from lab to delivery, on-chain.
 
-First, run the development server:
+**Live:** [pisgah.vercel.app](https://pisgah.vercel.app)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## What it does
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Pisgah coordinates the entire diagnostic journey: doctor orders a test, lab uploads results, AI drafts a clinical summary, doctor reviews and prescribes, pharmacy dispatches, rider delivers, patient confirms. Every step is attested on World Chain. Every facility has a verifiable ENS identity. Patient access is gated by World ID.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Framework:** Next.js 16, TypeScript, Tailwind CSS
+- **Database:** Neon Postgres, Drizzle ORM
+- **Auth:** Dynamic JavaScript SDK (providers), MiniKit walletAuth (patients)
+- **Identity:** World ID verification, ENS subnames via NameStone
+- **AI:** Claude Sonnet via Vercel AI SDK, AgentKit verified assistant
+- **On-chain:** EAS attestations on World Chain Sepolia
+- **Deploy:** Vercel
 
-## Learn More
+## Sponsor integrations
 
-To learn more about Next.js, take a look at the following resources:
+| Sponsor | Usage |
+|---------|-------|
+| Dynamic | Custom email OTP auth, JWT verification, role-based access |
+| World (MiniKit) | Patient wallet auth inside World App |
+| World (World ID) | Identity verification for viewing results and redeeming prescriptions |
+| World (AgentKit) | Human-backed AI assistant registered in AgentBook |
+| World (EAS) | On-chain attestations for lab results, prescriptions, deliveries |
+| ENS | Facility and agent identity subnames under pisgah.eth |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Try it out
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Provider dashboard:** [pisgah.vercel.app](https://pisgah.vercel.app)
+- **Verify a facility:** [pisgah.vercel.app/verify/penthouse-clinic.pisgah.eth](https://pisgah.vercel.app/verify/penthouse-clinic.pisgah.eth)
+- **Patient access:** Open Pisgah in [World App](https://world.org/mini-app?app_id=app_217d7d04bbd2e02a0a062517b189f473)
 
-## Deploy on Vercel
+## Contributing
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Contributions are welcome. Fork the repo, create a branch, and open a pull request. For major changes, open an issue first to discuss what you'd like to change.
