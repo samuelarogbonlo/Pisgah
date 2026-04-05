@@ -33,7 +33,6 @@ Pisgah coordinates the entire diagnostic journey: doctor orders a test, lab uplo
 
 - **Provider dashboard:** [pisgah.vercel.app](https://pisgah.vercel.app)
 - **Verify a facility:** [pisgah.vercel.app/verify/penthouse-clinic.pisgah.eth](https://pisgah.vercel.app/verify/penthouse-clinic.pisgah.eth)
-- **Patient access:** Open Pisgah in [World App](https://world.org/mini-app?app_id=app_217d7d04bbd2e02a0a062517b189f473)
 
 ## Contributing
 
