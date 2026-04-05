@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { getOrderProvenance, type OrderProvenance } from "./provenance-action";
 
 const EAS_BASE_URL =
-  "https://worldchain-sepolia.easscan.org/attestation/view";
+  "https://world-chain-sepolia.easscan.org/attestation/view";
 
 function truncateUid(uid: string): string {
   if (uid.length <= 12) return uid;

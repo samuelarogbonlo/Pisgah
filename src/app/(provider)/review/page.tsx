@@ -226,7 +226,7 @@ export default async function ReviewPage() {
                     Result Attestation UID
                   </p>
                   <a
-                    href={`https://worldchain-sepolia.easscan.org/attestation/view/${order.attestationUid}`}
+                    href={`https://world-chain-sepolia.easscan.org/attestation/view/${order.attestationUid}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="break-all font-mono text-[11px] text-gray-700 underline underline-offset-2 hover:text-black"
